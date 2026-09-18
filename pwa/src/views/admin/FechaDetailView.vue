@@ -777,24 +777,16 @@ if (typeof window !== 'undefined') {
               </div>
             </div>
 
-            <!-- Panel dispositivos -->
-            <div class="bg-gray-50 rounded-xl p-3 space-y-2 border border-gray-200">
-              <p class="text-[10px] text-gray-400 uppercase tracking-wider">Dispositivos</p>
-              <div class="space-y-1">
-                <div v-for="d in dispositivos" :key="d.codigo" class="flex items-center justify-between">
-                  <div class="flex items-center gap-2">
-                    <span :class="['w-2 h-2 rounded-full', d.online ? 'bg-green-500' : 'bg-red-400']"></span>
-                    <span class="text-xs font-medium text-gray-700">{{ d.codigo }}</span>
-                    <span class="text-[10px] text-gray-400">{{ d.tipo }}</span>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span v-if="d.online && d.ultimo_rssi" class="text-[10px] text-gray-400">{{ d.ultimo_rssi }}dBm</span>
-                    <span :class="['text-[10px] px-1.5 py-0.5 rounded-full', d.online ? 'bg-green-100 text-green-700' : 'bg-red-50 text-red-400']">{{ d.online ? 'Online' : 'Off' }}</span>
-                  </div>
+            <!-- Dispositivos + Botones -->
+            <div class="bg-gray-50 rounded-xl p-2 border border-gray-200 space-y-2">
+              <div class="flex items-center gap-3 flex-wrap">
+                <div v-for="d in dispositivos" :key="d.codigo" class="flex items-center gap-1">
+                  <span :class="['w-2 h-2 rounded-full', d.online ? 'bg-green-500' : 'bg-red-400']"></span>
+                  <span class="text-[10px] text-gray-600">{{ d.codigo }}</span>
+                  <span v-if="d.online && d.ultimo_rssi" class="text-[9px] text-gray-400">{{ d.ultimo_rssi }}</span>
                 </div>
               </div>
-              <!-- Botones -->
-              <div class="grid grid-cols-3 gap-2 pt-1">
+              <div class="grid grid-cols-3 gap-2">
                 <button @click="enviarComandoCrono('start')"
                   class="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-2.5 rounded-lg transition-colors">
                   ARMAR LARGADA
