@@ -151,21 +151,18 @@ const tramoB = ref({ tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, 
 const search = ref('')
 
 // Panel fisico cronometros
-const cronoA = ref<any>(null)
-const cronoB = ref<any>(null)
+const dispositivos = ref<any[]>([])
 let cronoTimer: ReturnType<typeof setInterval> | null = null
 
 async function fetchCronoEstado() {
   try {
-    const [a, b] = await Promise.all([
-      apiFetch<any>('/cronometro/crono-a/estado'),
-      apiFetch<any>('/cronometro/crono-b/estado'),
-    ])
-    cronoA.value = a.data
-    cronoB.value = b.data
+    const res = await apiFetch<any[]>("/dispositivos-cronometro")
+    dispositivos.value = (res.data || []).map((d: any) => {
+      const ago = d.ultimo_visto_at ? Math.floor((Date.now() - new Date(d.ultimo_visto_at + "Z").getTime()) / 1000) : null
+      return { ...d, online: ago !== null && ago < 30, segundos_ago: ago }
+    })
   } catch {}
 }
-
 function startCronoPolling() {
   fetchCronoEstado()
   if (!cronoTimer) cronoTimer = setInterval(fetchCronoEstado, 3000)
@@ -240,6 +237,9 @@ async function loadRanking() {
     rankingData.value = null
   }
 }
+
+const cronoA = computed(() => dispositivos.value.find((d: any) => d.codigo === 'crono-a'))
+const cronoB = computed(() => dispositivos.value.find((d: any) => d.codigo === 'crono-b'))
 
 const selectedCat = computed(() => fechaCategorias.value.find((c: any) => c.id === selectedCatId.value))
 const filteredTrips = computed(() => {
@@ -777,28 +777,22 @@ if (typeof window !== 'undefined') {
               </div>
             </div>
 
-            <!-- Panel fisico cronometros -->
+            <!-- Panel dispositivos -->
             <div class="bg-gray-50 rounded-xl p-3 space-y-2 border border-gray-200">
-              <p class="text-[10px] text-gray-400 uppercase tracking-wider">Panel fisico</p>
-
-              <!-- Pista A -->
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span :class="['w-2 h-2 rounded-full', cronoA?.online ? 'bg-green-500' : 'bg-red-400']"></span>
-                  <span class="text-xs text-gray-600 font-medium">Pista A</span>
-                  <span class="text-[10px] text-gray-400">{{ cronoA?.online ? 'Online' : 'Offline' }}</span>
+              <p class="text-[10px] text-gray-400 uppercase tracking-wider">Dispositivos</p>
+              <div class="space-y-1">
+                <div v-for="d in dispositivos" :key="d.codigo" class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span :class="['w-2 h-2 rounded-full', d.online ? 'bg-green-500' : 'bg-red-400']"></span>
+                    <span class="text-xs font-medium text-gray-700">{{ d.codigo }}</span>
+                    <span class="text-[10px] text-gray-400">{{ d.tipo }}</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span v-if="d.online && d.ultimo_rssi" class="text-[10px] text-gray-400">{{ d.ultimo_rssi }}dBm</span>
+                    <span :class="['text-[10px] px-1.5 py-0.5 rounded-full', d.online ? 'bg-green-100 text-green-700' : 'bg-red-50 text-red-400']">{{ d.online ? 'Online' : 'Off' }}</span>
+                  </div>
                 </div>
               </div>
-
-              <!-- Pista B (solo doble) -->
-              <div v-if="(selectedCat?.tipo_pista || fecha?.tipo_pista) === 'doble'" class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span :class="['w-2 h-2 rounded-full', cronoB?.online ? 'bg-green-500' : 'bg-red-400']"></span>
-                  <span class="text-xs text-gray-600 font-medium">Pista B</span>
-                  <span class="text-[10px] text-gray-400">{{ cronoB?.online ? 'Online' : 'Offline' }}</span>
-                </div>
-              </div>
-
               <!-- Botones -->
               <div class="grid grid-cols-3 gap-2 pt-1">
                 <button @click="enviarComandoCrono('start')"
