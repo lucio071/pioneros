@@ -143,7 +143,7 @@ void renderDisplay() {
   canvas->setCursor(58, 1);
   canvas->printf("V:%d", vuelta_copy);
 
-  uint16_t color_tiempo = (estado == PARADO) ? display->color565(255, 0, 0) : display->color565(0, 255, 0);
+  uint16_t color_tiempo = (estado == PARADO || estado == MOSTRANDO_TIEMPO) ? display->color565(255, 0, 0) : display->color565(0, 255, 0);
   canvas->setTextColor(color_tiempo);
   canvas->setCursor(16, 11);
   canvas->print(buf);
