@@ -318,6 +318,25 @@ void loop() {
     updateDisplay();
   }
 
+  // Heartbeat propio del gateway cada 5s
+  static uint32_t last_gw_hb = 0;
+  if (wifi_connected && millis() - last_gw_hb > 5000) {
+    HTTPClient http;
+    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.begin(String(API_URL) + "/api/v1/cronometro/heartbeat");
+    http.addHeader("Authorization", String("Bearer ") + GW_TOKEN);
+    http.addHeader("Content-Type", "application/json");
+    StaticJsonDocument<128> doc;
+    doc["rssi"] = WiFi.RSSI();
+    doc["voltaje_mv"] = 5000;
+    doc["uptime_sec"] = millis() / 1000;
+    String body;
+    serializeJson(doc, body);
+    http.POST(body);
+    http.end();
+    last_gw_hb = millis();
+  }
+
   static uint32_t last_reconnect = 0;
   if (!wifi_connected && millis() - last_reconnect > 5000) {
     Serial.println("[WiFi] reconectando...");
