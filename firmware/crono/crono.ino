@@ -252,7 +252,8 @@ void consultarComandos() {
           cmdSetTiempo(ms);
         }
         else if (strcmp(tipo, "set_tripulacion") == 0) {
-          String num = cmd["payload"]["numero"] | "";
+          int numero = cmd["payload"]["numero"] | 0;
+          String num = String(numero);
           int v = cmd["payload"]["vuelta"] | 1;
           cmdSetTripulacion(num, v);
         }
