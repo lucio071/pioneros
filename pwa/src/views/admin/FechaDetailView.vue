@@ -200,6 +200,46 @@ async function enviarNumeroTripulacion(numero: string | number) {
 
 onMounted(load)
 
+function imprimirTiempo(trip: any, vuelta: any) {
+  const cat = selectedCat.value
+  const pe = cat?.penal_estaca_seg || 5
+  const pc = cat?.penal_cinta_seg || 10
+  const catNom = cat?.categoria_catalogo?.nombre || cat?.nombre || ''
+  const tramos = vuelta.tramos || []
+  let tramoHtml = ''
+  for (const tr of tramos) {
+    tramoHtml += '<div class="row"><span>Pista ' + tr.letra + ':</span><span>' + formatTiempo(tr.tiempo_ms) + '</span></div>'
+    if (tr.estacas || tr.cintas) {
+      const pms = (tr.estacas * pe + tr.cintas * pc) * 1000
+      tramoHtml += '<div style="font-size:10px">&nbsp;&nbsp;E:' + tr.estacas + ' C:' + tr.cintas + ' (+' + formatTiempo(pms) + ')</div>'
+    }
+  }
+  const vn = vuelta.numero_vuelta === 99 ? 'FINAL' : vuelta.numero_vuelta
+  const now = new Date().toLocaleString()
+  const doc = [
+    '<html><head><style>',
+    'body{font-family:monospace;width:58mm;margin:0;padding:4px;font-size:12px}',
+    'h1{font-size:16px;margin:2px 0;text-align:center}',
+    'h2{font-size:14px;margin:2px 0}',
+    'hr{border:1px dashed #000;margin:4px 0}',
+    '.row{display:flex;justify-content:space-between;margin:2px 0}',
+    '.big{font-size:18px;font-weight:bold}',
+    '@media print{@page{margin:0;size:58mm auto}}',
+    '</style></head><body>',
+    '<h1>PIONEROS 4x4</h1><hr>',
+    '<h2>#' + trip.numero + ' ' + trip.nombre + '</h2>',
+    '<div>' + trip.piloto + (trip.copiloto ? ' / ' + trip.copiloto : '') + '</div><hr>',
+    '<div><b>Vuelta ' + vn + '</b> - ' + catNom + '</div>',
+    tramoHtml,
+    '<hr><div class="row"><span class="big">TOTAL:</span><span class="big">' + formatTiempo(vuelta.total_vuelta) + '</span></div><hr>',
+    '<div style="text-align:center;font-size:10px">' + now + '</div>',
+    '<script>window.print();window.close()<\/script>',
+    '</body></html>'
+  ].join('')
+  const w = window.open('', '_blank', 'width=300,height=400')
+  if (w) { w.document.write(doc); w.document.close() }
+}
+
 async function load() {
   loading.value = true
   const id = route.params.id as string
@@ -771,9 +811,13 @@ if (typeof window !== 'undefined') {
                   V{{ v.numero_vuelta === 99 ? 'F' : v.numero_vuelta }}:
                   {{ v.nula ? 'NULA' : formatTiempo(v.total_vuelta) }}
                 </span>
-                <span v-if="v.confirmada" class="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">CONFIRMADA</span>
-                <button v-else @click="confirmarVuelta(v.id)"
-                  class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium">Confirmar</button>
+                <div class="flex gap-1">
+                  <button v-if="!v.nula" @click="imprimirTiempo(selectedTrip, v)"
+                    class="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded">Print</button>
+                  <span v-if="v.confirmada" class="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">OK</span>
+                  <button v-else @click="confirmarVuelta(v.id)"
+                    class="text-xs bg-blue-600 text-white px-2 py-1 rounded-lg font-medium">Confirmar</button>
+                </div>
               </div>
             </div>
 
