@@ -39,6 +39,7 @@ const pares = computed(() => {
   return result
 })
 const ordenList = ref<any[]>([])
+const ordenBloqueado = ref(false)
 
 function initOrdenList() {
   ordenList.value = [...tripulaciones.value].sort((a: any, b: any) => (a.orden_largada || 99) - (b.orden_largada || 99))
@@ -80,7 +81,8 @@ async function guardarOrden() {
       await apiMutate("PUT", "/tripulaciones/" + t.id, { orden_largada: i + 1 })
     }
   }
-  showToast("Orden guardado")
+  showToast("Orden guardado y bloqueado")
+  ordenBloqueado.value = true
   await load()
   initOrdenList()
 }
@@ -746,7 +748,8 @@ if (typeof window !== 'undefined') {
 
           <!-- Vista de pares con reorden -->
           <div v-if="showPares && fecha?.tipo_pista === 'doble'" class="space-y-2">
-            <p class="text-xs text-gray-400">Usa las flechas para reordenar. Los pares se arman automatico (1vs2, 3vs4...).</p>
+            <p v-if="!ordenBloqueado" class="text-xs text-gray-400">Usa las flechas para reordenar. Los pares se arman automatico (1vs2, 3vs4...).</p>
+            <p v-else class="text-xs text-green-600 font-medium">Orden bloqueado. Toca "Desbloquear" para modificar.</p>
             <div class="bg-white rounded-xl shadow-sm divide-y divide-gray-100">
               <div v-for="(t, i) in ordenList" :key="t.id"
                 class="flex items-center gap-2 px-3 py-2">
@@ -758,14 +761,14 @@ if (typeof window !== 'undefined') {
                 <span class="font-bold text-gray-800 text-sm">#{{ t.numero }}</span>
                 <span class="text-xs text-gray-500 truncate flex-1">{{ t.piloto }}</span>
                 <div class="flex gap-1 shrink-0">
-                  <button @click="moverArriba(i)" :disabled="i === 0"
+                  <button v-if="!ordenBloqueado" @click="moverArriba(i)" :disabled="i === 0"
                     class="w-7 h-7 rounded bg-gray-100 hover:bg-gray-200 text-gray-500 disabled:opacity-30 text-sm">&#x25B2;</button>
-                  <button @click="moverAbajo(i)" :disabled="i === ordenList.length - 1"
+                  <button v-if="!ordenBloqueado" @click="moverAbajo(i)" :disabled="i === ordenList.length - 1"
                     class="w-7 h-7 rounded bg-gray-100 hover:bg-gray-200 text-gray-500 disabled:opacity-30 text-sm">&#x25BC;</button>
                 </div>
               </div>
             </div>
-            <div class="flex gap-2">
+            <div v-if="!ordenBloqueado" class="flex gap-2">
               <button @click="sortearOrden" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-medium py-2 rounded-lg text-sm">
                 Sortear
               </button>
@@ -773,6 +776,10 @@ if (typeof window !== 'undefined') {
                 Guardar orden
               </button>
             </div>
+            <button v-else @click="ordenBloqueado = false"
+              class="w-full bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2 rounded-lg text-sm">
+              Desbloquear orden
+            </button>
             <div class="space-y-1">
               <div v-for="(par, i) in pares" :key="i" class="bg-gray-50 rounded-lg p-2 flex items-center gap-2">
                 <span class="text-xs text-gray-400 w-5 text-center">{{ i + 1 }}</span>
