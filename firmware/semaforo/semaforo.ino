@@ -28,8 +28,8 @@
 // Reles (ACTIVE LOW)
 #define RELE_ROJO1  13
 #define RELE_ROJO2  14
-#define RELE_ROJO3  22
-#define RELE_VERDE  33
+#define RELE_ROJO3  32  // LoRa1
+#define RELE_VERDE  33  // LoRa2
 
 // Protocolo LoRa
 #define MAGIC         0xA5
