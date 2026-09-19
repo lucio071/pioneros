@@ -42,6 +42,7 @@ const ordenList = ref<any[]>([])
 const ordenBloqueado = ref(false)
 const pistaATrip = ref<any>(null)
 const pistaBTrip = ref<any>(null)
+const selectedTripB = ref<any>(null)
 
 function asignarPista(t: any) {
   if (esDobleCategoria.value && !showPares.value) {
@@ -62,14 +63,21 @@ function iniciarParManual() {
   if (!pistaATrip.value) return
   const tripA = pistaATrip.value
   const tripB = pistaBTrip.value
-  selectedHeat.value = { index: 0, tripA, tripB }
-  heatCorrida.value = 1
-  heatStartTime.value = null
-  startCronoPolling()
+
+  // Guardar trip B para mostrar en cronometraje
+  selectedTripB.value = tripB
+
+  // Seleccionar trip A como principal
+  selectTrip(tripA)
+
+  // Mandar numero al crono-a
   enviarNumeroTripulacion(tripA.numero)
+
+  // Si hay trip B, mandar al crono-b
   if (tripB) {
     apiMutate('POST', '/cronometro/crono-b/comando', { tipo: 'set_tripulacion', payload: { numero: Number(tripB.numero), vuelta: selectedVuelta.value } }).catch(() => {})
   }
+
   pistaATrip.value = null
   pistaBTrip.value = null
 }
@@ -825,7 +833,7 @@ if (typeof window !== 'undefined') {
           </div>
 
           <!-- Seleccion de par manual (pista doble) -->
-          <div v-if="esDobleCategoria && !showPares" class="bg-white rounded-xl p-3 shadow-sm space-y-2 mb-2">
+          <div v-if="esDobleCategoria" class="bg-white rounded-xl p-3 shadow-sm space-y-2 mb-2">
             <p class="text-[10px] text-gray-400 uppercase tracking-wider">Armar par</p>
             <div class="grid grid-cols-2 gap-2">
               <div :class="['rounded-lg p-2 text-center border-2', pistaATrip ? 'bg-blue-50 border-blue-400' : 'bg-gray-50 border-dashed border-gray-300']">
@@ -876,10 +884,24 @@ if (typeof window !== 'undefined') {
 
         <!-- Trip selected: entry form -->
         <template v-else>
-          <button @click="selectedTrip = null; stopCronoPolling(); enviarNumeroTripulacion(0)" class="text-sm text-blue-600">&larr; Volver</button>
+          <button @click="selectedTrip = null; selectedTripB = null; stopCronoPolling(); enviarNumeroTripulacion(0)" class="text-sm text-blue-600">&larr; Volver</button>
 
           <div class="bg-white rounded-xl p-4 shadow-sm space-y-4">
-            <div class="flex items-center gap-3">
+            <div v-if="selectedTripB" class="grid grid-cols-2 gap-2">
+              <div class="bg-blue-50 rounded-lg p-2 text-center border border-blue-200">
+                <p class="text-[10px] text-blue-500 font-medium">PISTA A</p>
+                <p class="font-bold text-xl text-gray-800">#{{ selectedTrip.numero }}</p>
+                <p class="text-xs text-gray-600">{{ selectedTrip.nombre }}</p>
+                <p class="text-[10px] text-gray-400">{{ selectedTrip.piloto }}</p>
+              </div>
+              <div class="bg-amber-50 rounded-lg p-2 text-center border border-amber-200">
+                <p class="text-[10px] text-amber-500 font-medium">PISTA B</p>
+                <p class="font-bold text-xl text-gray-800">#{{ selectedTripB.numero }}</p>
+                <p class="text-xs text-gray-600">{{ selectedTripB.nombre }}</p>
+                <p class="text-[10px] text-gray-400">{{ selectedTripB.piloto }}</p>
+              </div>
+            </div>
+            <div v-else class="flex items-center gap-3">
               <div class="w-14 h-14 bg-[var(--brand-color)] text-white rounded-lg flex items-center justify-center font-bold text-2xl">
                 {{ selectedTrip.numero }}
               </div>
