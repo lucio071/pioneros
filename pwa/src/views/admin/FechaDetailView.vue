@@ -40,6 +40,39 @@ const pares = computed(() => {
 })
 const ordenList = ref<any[]>([])
 const ordenBloqueado = ref(false)
+const pistaATrip = ref<any>(null)
+const pistaBTrip = ref<any>(null)
+
+function asignarPista(t: any) {
+  if (esDobleCategoria.value && !showPares.value) {
+    // Modo doble: asignar a pista A o B
+    if (pistaATrip.value?.id === t.id) { pistaATrip.value = null; return }
+    if (pistaBTrip.value?.id === t.id) { pistaBTrip.value = null; return }
+    if (!pistaATrip.value) { pistaATrip.value = t; return }
+    if (!pistaBTrip.value) { pistaBTrip.value = t; return }
+    // Ambas ocupadas: reemplazar B
+    pistaBTrip.value = t
+  } else {
+    // Modo simple: seleccionar directo
+    selectTrip(t)
+  }
+}
+
+function iniciarParManual() {
+  if (!pistaATrip.value) return
+  const tripA = pistaATrip.value
+  const tripB = pistaBTrip.value
+  selectedHeat.value = { index: 0, tripA, tripB }
+  heatCorrida.value = 1
+  heatStartTime.value = null
+  startCronoPolling()
+  enviarNumeroTripulacion(tripA.numero)
+  if (tripB) {
+    apiMutate('POST', '/cronometro/crono-b/comando', { tipo: 'set_tripulacion', payload: { numero: Number(tripB.numero), vuelta: selectedVuelta.value } }).catch(() => {})
+  }
+  pistaATrip.value = null
+  pistaBTrip.value = null
+}
 
 function initOrdenList() {
   ordenList.value = [...tripulaciones.value].sort((a: any, b: any) => (a.orden_largada || 99) - (b.orden_largada || 99))
@@ -791,20 +824,52 @@ if (typeof window !== 'undefined') {
             </div>
           </div>
 
+          <!-- Seleccion de par manual (pista doble) -->
+          <div v-if="esDobleCategoria && !showPares" class="bg-white rounded-xl p-3 shadow-sm space-y-2 mb-2">
+            <p class="text-[10px] text-gray-400 uppercase tracking-wider">Armar par</p>
+            <div class="grid grid-cols-2 gap-2">
+              <div :class="['rounded-lg p-2 text-center border-2', pistaATrip ? 'bg-blue-50 border-blue-400' : 'bg-gray-50 border-dashed border-gray-300']">
+                <p class="text-[10px] text-blue-500">Pista A</p>
+                <p v-if="pistaATrip" class="font-bold text-lg">#{{ pistaATrip.numero }}</p>
+                <p v-if="pistaATrip" class="text-xs text-gray-500">{{ pistaATrip.piloto }}</p>
+                <p v-else class="text-gray-300 text-sm">Tocar tripulacion</p>
+                <button v-if="pistaATrip" @click="pistaATrip = null" class="text-[10px] text-red-400 mt-1">Quitar</button>
+              </div>
+              <div :class="['rounded-lg p-2 text-center border-2', pistaBTrip ? 'bg-amber-50 border-amber-400' : 'bg-gray-50 border-dashed border-gray-300']">
+                <p class="text-[10px] text-amber-500">Pista B</p>
+                <p v-if="pistaBTrip" class="font-bold text-lg">#{{ pistaBTrip.numero }}</p>
+                <p v-if="pistaBTrip" class="text-xs text-gray-500">{{ pistaBTrip.piloto }}</p>
+                <p v-else class="text-gray-300 text-sm">Tocar tripulacion</p>
+                <button v-if="pistaBTrip" @click="pistaBTrip = null" class="text-[10px] text-red-400 mt-1">Quitar</button>
+              </div>
+            </div>
+            <button v-if="pistaATrip" @click="iniciarParManual"
+              class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-lg text-sm">
+              Cronometrar {{ pistaATrip ? '#' + pistaATrip.numero : '' }} {{ pistaBTrip ? 'vs #' + pistaBTrip.numero : '(solo)' }}
+            </button>
+          </div>
+
           <!-- Lista de tripulaciones para cronometrar -->
           <div class="space-y-1.5">
-            <button v-for="t in filteredTrips" :key="t.id" @click="selectTrip(t)"
+            <button v-for="t in filteredTrips" :key="t.id" @click="asignarPista(t)"
               class="w-full bg-white rounded-lg p-3 shadow-sm flex items-center gap-3 text-left hover:shadow-md transition-shadow">
-              <div class="w-12 h-12 bg-[var(--brand-color)] text-white rounded-lg flex items-center justify-center font-bold text-xl shrink-0">
+              <div :class="['w-12 h-12 rounded-lg flex items-center justify-center font-bold text-xl shrink-0',
+                pistaATrip?.id === t.id ? 'bg-blue-500 text-white' :
+                pistaBTrip?.id === t.id ? 'bg-amber-500 text-white' :
+                'bg-[var(--brand-color)] text-white']">
                 {{ t.numero }}
               </div>
               <div class="min-w-0 flex-1">
                 <p class="font-medium text-gray-800 text-sm">{{ t.nombre }}</p>
                 <p class="text-xs text-gray-500">{{ t.piloto }}</p>
               </div>
-              <span :class="['text-[10px] px-1.5 py-0.5 rounded-full shrink-0', estadoColor(t.estado)]">
-                {{ estadoLabel(t.estado) }}
-              </span>
+              <div class="flex items-center gap-1 shrink-0">
+                <span v-if="pistaATrip?.id === t.id" class="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">A</span>
+                <span v-if="pistaBTrip?.id === t.id" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">B</span>
+                <span :class="['text-[10px] px-1.5 py-0.5 rounded-full', estadoColor(t.estado)]">
+                  {{ estadoLabel(t.estado) }}
+                </span>
+              </div>
             </button>
           </div>
         </template>
