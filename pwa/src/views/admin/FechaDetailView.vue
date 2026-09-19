@@ -62,6 +62,17 @@ function moverAbajo(i: number) {
   ordenList.value = [...list]
 }
 
+function sortearOrden() {
+  const list = [...ordenList.value]
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = list[i]
+    list[i] = list[j]
+    list[j] = tmp
+  }
+  ordenList.value = [...list]
+}
+
 async function guardarOrden() {
   for (let i = 0; i < ordenList.value.length; i++) {
     const t = ordenList.value[i]
@@ -754,9 +765,14 @@ if (typeof window !== 'undefined') {
                 </div>
               </div>
             </div>
-            <button @click="guardarOrden" class="w-full bg-[var(--brand-color)] text-white font-medium py-2 rounded-lg text-sm">
-              Guardar orden
-            </button>
+            <div class="flex gap-2">
+              <button @click="sortearOrden" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-medium py-2 rounded-lg text-sm">
+                Sortear
+              </button>
+              <button @click="guardarOrden" class="flex-1 bg-[var(--brand-color)] text-white font-medium py-2 rounded-lg text-sm">
+                Guardar orden
+              </button>
+            </div>
             <div class="space-y-1">
               <div v-for="(par, i) in pares" :key="i" class="bg-gray-50 rounded-lg p-2 flex items-center gap-2">
                 <span class="text-xs text-gray-400 w-5 text-center">{{ i + 1 }}</span>
