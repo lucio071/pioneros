@@ -60,6 +60,7 @@ function asignarPista(t: any) {
 }
 
 const corridaActual = ref<1 | 2>(1)
+const corrida1Guardada = ref(false)
 
 // Quien corre en cada pista segun la corrida
 const tripEnPistaA = computed(() => {
@@ -78,6 +79,7 @@ function iniciarParManual() {
 
   selectedTripB.value = tripB
   corridaActual.value = 1
+  corrida1Guardada.value = false
   startCronoPolling()
 
   // Seleccionar trip A como principal
@@ -207,6 +209,7 @@ async function guardarCorrida() {
 
     // Si fue corrida 1, auto-pasar a corrida 2
     if (corridaActual.value === 1 && tripB) {
+      corrida1Guardada.value = true
       cambiarACorrida2()
     }
   } catch (e: any) {
@@ -971,9 +974,10 @@ if (typeof window !== 'undefined') {
                     corridaActual === 1 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500']">
                   Corrida 1
                 </button>
-                <button @click="cambiarACorrida2()"
+                <button @click="corrida1Guardada ? cambiarACorrida2() : undefined"
+                  :disabled="!corrida1Guardada"
                   :class="['px-4 py-1.5 rounded-lg text-sm font-bold transition-colors',
-                    corridaActual === 2 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500']">
+                    corridaActual === 2 ? 'bg-blue-600 text-white' : !corrida1Guardada ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-gray-100 text-gray-500']">
                   Corrida 2
                 </button>
               </div>
