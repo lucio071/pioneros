@@ -200,8 +200,25 @@ async function guardarTiempoHeat(corridaNum: 1 | 2) {
 
 const selectedTrip = ref<any>(null)
 const selectedVuelta = ref(1)
-const tramoA = ref({ tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0 })
-const tramoB = ref({ tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0 })
+const tramoA = ref({ tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] as number[] })
+const tramoB = ref({ tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] as number[] })
+const tmInputA = ref({ min: '', seg: '' })
+const tmInputB = ref({ min: '', seg: '' })
+
+function agregarTM(letra: 'A' | 'B') {
+  const input = letra === 'A' ? tmInputA.value : tmInputB.value
+  const segs = (parseInt(input.min) || 0) * 60 + (parseInt(input.seg) || 0)
+  if (segs <= 0) return
+  const form = letra === 'A' ? tramoA.value : tramoB.value
+  form.tiempos_muertos.push(segs)
+  input.min = ''
+  input.seg = ''
+}
+
+function quitarTM(letra: 'A' | 'B', index: number) {
+  const form = letra === 'A' ? tramoA.value : tramoB.value
+  form.tiempos_muertos.splice(index, 1)
+}
 const search = ref('')
 
 // Panel fisico cronometros
@@ -430,8 +447,29 @@ function selectTrip(t: any) {
 }
 
 function resetTramoForms() {
-  tramoA.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0 }
-  tramoB.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0 }
+  tramoA.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] }
+  tramoB.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] }
+  tmInputA.value = { min: '', seg: '' }
+  tmInputB.value = { min: '', seg: '' }
+
+  // Precargar datos existentes de la vuelta seleccionada
+  if (selectedTrip.value) {
+    const vuelta = (selectedTrip.value.vueltas || []).find((v: any) =>
+      v.numero_vuelta === selectedVuelta.value && v.fase === (selectedVuelta.value === 99 ? 'final' : 'clasificacion'))
+    if (vuelta?.tramos) {
+      for (const tr of vuelta.tramos) {
+        const form = tr.letra === 'A' ? tramoA : tramoB
+        const ms = tr.tiempo_ms || 0
+        const totalSec = Math.floor(ms / 1000)
+        form.value.tiempo_min = totalSec >= 60 ? String(Math.floor(totalSec / 60)) : ''
+        form.value.tiempo_sec = String(totalSec % 60) || ''
+        form.value.tiempo_ms = String(Math.floor((ms % 1000) / 10)) || ''
+        form.value.estacas = tr.estacas || 0
+        form.value.cintas = tr.cintas || 0
+        form.value.tiempos_muertos = (tr.tiempos_muertos || []).map((tm: any) => tm.segundos || tm)
+      }
+    }
+  }
 }
 
 function tramoToMs(t: any): number {
@@ -446,6 +484,7 @@ async function guardarTramo(letra: 'A' | 'B') {
     tiempo_ms: tramoToMs(form),
     estacas: form.estacas,
     cintas: form.cintas,
+    tiempos_muertos: form.tiempos_muertos,
   }
 
   const path = `/tripulaciones/${selectedTrip.value.id}/vueltas/${selectedVuelta.value}/tramos/${letra}`
@@ -455,7 +494,6 @@ async function guardarTramo(letra: 'A' | 'B') {
     if (navigator.vibrate) navigator.vibrate(50)
     showToast(`Tramo ${letra} guardado`)
     await load()
-    // Refresh selected trip data
     selectedTrip.value = tripulaciones.value.find((t: any) => t.id === selectedTrip.value?.id) || null
   } catch (e: any) {
     if (!navigator.onLine) {
@@ -463,6 +501,48 @@ async function guardarTramo(letra: 'A' | 'B') {
       showToast('Sin conexion - guardado en cola')
     } else {
       showToast(e.message || 'Error', 'error')
+    }
+  }
+}
+
+async function guardarVuelta() {
+  if (!selectedTrip.value) return
+  const tripId = selectedTrip.value.id
+  const vuelta = selectedVuelta.value
+
+  const bodyA = {
+    tiempo_ms: tramoToMs(tramoA.value),
+    estacas: tramoA.value.estacas,
+    cintas: tramoA.value.cintas,
+    tiempos_muertos: tramoA.value.tiempos_muertos,
+  }
+  const bodyB = {
+    tiempo_ms: tramoToMs(tramoB.value),
+    estacas: tramoB.value.estacas,
+    cintas: tramoB.value.cintas,
+    tiempos_muertos: tramoB.value.tiempos_muertos,
+  }
+
+  const pathA = `/tripulaciones/${tripId}/vueltas/${vuelta}/tramos/A`
+  const pathB = `/tripulaciones/${tripId}/vueltas/${vuelta}/tramos/B`
+
+  try {
+    await Promise.all([
+      apiMutate('PUT', pathA, bodyA),
+      apiMutate('PUT', pathB, bodyB),
+    ])
+    if (navigator.vibrate) navigator.vibrate([50, 50, 50])
+    showToast(`Vuelta V${vuelta === 99 ? 'F' : vuelta} guardada (A + B)`)
+    resetTramoForms()
+    await load()
+    selectedTrip.value = tripulaciones.value.find((t: any) => t.id === tripId) || null
+  } catch (e: any) {
+    if (!navigator.onLine) {
+      await offline.enqueue('PUT', pathA, bodyA)
+      await offline.enqueue('PUT', pathB, bodyB)
+      showToast('Sin conexion - guardado en cola')
+    } else {
+      showToast(e.message || 'Error al guardar vuelta', 'error')
     }
   }
 }
@@ -976,85 +1056,120 @@ if (typeof window !== 'undefined') {
               </button>
             </div>
 
-            <!-- Tramo A -->
-            <div class="bg-gray-50 rounded-lg p-3 space-y-2">
-              <p class="text-xs text-gray-500 font-medium uppercase">
-                {{ fecha?.tipo_pista === 'doble' ? 'Tramo A' : 'Tiempo' }}
-              </p>
-              <div class="flex items-center gap-1">
-                <input v-model="tramoA.tiempo_min" data-ref="a-min" inputmode="numeric" maxlength="2" placeholder="00"
-                  @input="autotab($event, 'a-sec')"
-                  class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
-                <span class="text-xl text-gray-400 font-bold">:</span>
-                <input v-model="tramoA.tiempo_sec" data-ref="a-sec" inputmode="numeric" maxlength="2" placeholder="00"
-                  @input="autotab($event, 'a-cc')"
-                  class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
-                <span class="text-xl text-gray-400 font-bold">:</span>
-                <input v-model="tramoA.tiempo_ms" data-ref="a-cc" inputmode="numeric" maxlength="2" placeholder="00"
-                  class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="text-xs text-gray-400">Estacas</label>
-                  <div class="flex items-center gap-2">
-                    <button @click="tramoA.estacas = Math.max(0, tramoA.estacas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
-                    <span class="text-xl font-mono w-6 text-center">{{ tramoA.estacas }}</span>
-                    <button @click="tramoA.estacas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+            <!-- Tramos A + B juntos -->
+            <div :class="['gap-3', esDobleCategoria ? 'grid grid-cols-1 sm:grid-cols-2' : '']">
+              <!-- Tramo A -->
+              <div class="bg-gray-50 rounded-lg p-3 space-y-2">
+                <p :class="['text-xs font-medium uppercase', esDobleCategoria ? 'text-blue-500' : 'text-gray-500']">
+                  {{ esDobleCategoria ? 'Pista A' : 'Tiempo' }}
+                </p>
+                <div class="flex items-center gap-1">
+                  <input v-model="tramoA.tiempo_min" data-ref="a-min" inputmode="numeric" maxlength="2" placeholder="00"
+                    @input="autotab($event, 'a-sec')"
+                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
+                  <span class="text-xl text-gray-400 font-bold">:</span>
+                  <input v-model="tramoA.tiempo_sec" data-ref="a-sec" inputmode="numeric" maxlength="2" placeholder="00"
+                    @input="autotab($event, 'a-cc')"
+                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
+                  <span class="text-xl text-gray-400 font-bold">:</span>
+                  <input v-model="tramoA.tiempo_ms" data-ref="a-cc" inputmode="numeric" maxlength="2" placeholder="00"
+                    :class="['w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500',
+                      esDobleCategoria ? '' : '']"
+                    @input="esDobleCategoria ? autotab($event, 'b-min') : undefined" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="text-xs text-gray-400">Estacas</label>
+                    <div class="flex items-center gap-2">
+                      <button @click="tramoA.estacas = Math.max(0, tramoA.estacas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-xl font-mono w-6 text-center">{{ tramoA.estacas }}</span>
+                      <button @click="tramoA.estacas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="text-xs text-gray-400">Cintas</label>
+                    <div class="flex items-center gap-2">
+                      <button @click="tramoA.cintas = Math.max(0, tramoA.cintas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-xl font-mono w-6 text-center">{{ tramoA.cintas }}</span>
+                      <button @click="tramoA.cintas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <label class="text-xs text-gray-400">Cintas</label>
-                  <div class="flex items-center gap-2">
-                    <button @click="tramoA.cintas = Math.max(0, tramoA.cintas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
-                    <span class="text-xl font-mono w-6 text-center">{{ tramoA.cintas }}</span>
-                    <button @click="tramoA.cintas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                <!-- Tiempos muertos A -->
+                <div class="space-y-1">
+                  <label class="text-xs text-orange-500 font-medium">Tiempos muertos (se restan)</label>
+                  <div v-for="(tm, i) in tramoA.tiempos_muertos" :key="i" class="flex items-center gap-2 bg-orange-50 rounded px-2 py-1">
+                    <span class="text-sm font-mono text-orange-700">-{{ Math.floor(tm/60) }}:{{ String(tm%60).padStart(2,'0') }}</span>
+                    <button @click="quitarTM('A', i)" class="text-red-400 hover:text-red-600 text-xs ml-auto">&#x2715;</button>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <input v-model="tmInputA.min" inputmode="numeric" maxlength="2" placeholder="min" class="w-12 text-center text-sm font-mono border border-gray-300 rounded py-1 outline-none focus:ring-2 focus:ring-orange-400" />
+                    <span class="text-gray-400">:</span>
+                    <input v-model="tmInputA.seg" inputmode="numeric" maxlength="2" placeholder="seg" class="w-12 text-center text-sm font-mono border border-gray-300 rounded py-1 outline-none focus:ring-2 focus:ring-orange-400" />
+                    <button @click="agregarTM('A')" class="text-xs bg-orange-100 hover:bg-orange-200 text-orange-700 px-2 py-1 rounded font-medium">+ TM</button>
+                  </div>
+                </div>
+                <button v-if="!esDobleCategoria" @click="guardarTramo('A')"
+                  class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-lg transition-colors">
+                  Guardar
+                </button>
+              </div>
+
+              <!-- Tramo B (solo pista doble) -->
+              <div v-if="esDobleCategoria" class="bg-gray-50 rounded-lg p-3 space-y-2">
+                <p class="text-xs text-amber-500 font-medium uppercase">Pista B</p>
+                <div class="flex items-center gap-1">
+                  <input v-model="tramoB.tiempo_min" data-ref="b-min" inputmode="numeric" maxlength="2" placeholder="00"
+                    @input="autotab($event, 'b-sec')"
+                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
+                  <span class="text-xl text-gray-400 font-bold">:</span>
+                  <input v-model="tramoB.tiempo_sec" data-ref="b-sec" inputmode="numeric" maxlength="2" placeholder="00"
+                    @input="autotab($event, 'b-cc')"
+                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
+                  <span class="text-xl text-gray-400 font-bold">:</span>
+                  <input v-model="tramoB.tiempo_ms" data-ref="b-cc" inputmode="numeric" maxlength="2" placeholder="00"
+                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="text-xs text-gray-400">Estacas</label>
+                    <div class="flex items-center gap-2">
+                      <button @click="tramoB.estacas = Math.max(0, tramoB.estacas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-xl font-mono w-6 text-center">{{ tramoB.estacas }}</span>
+                      <button @click="tramoB.estacas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="text-xs text-gray-400">Cintas</label>
+                    <div class="flex items-center gap-2">
+                      <button @click="tramoB.cintas = Math.max(0, tramoB.cintas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-xl font-mono w-6 text-center">{{ tramoB.cintas }}</span>
+                      <button @click="tramoB.cintas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    </div>
+                  </div>
+                </div>
+                <!-- Tiempos muertos B -->
+                <div class="space-y-1">
+                  <label class="text-xs text-orange-500 font-medium">Tiempos muertos (se restan)</label>
+                  <div v-for="(tm, i) in tramoB.tiempos_muertos" :key="i" class="flex items-center gap-2 bg-orange-50 rounded px-2 py-1">
+                    <span class="text-sm font-mono text-orange-700">-{{ Math.floor(tm/60) }}:{{ String(tm%60).padStart(2,'0') }}</span>
+                    <button @click="quitarTM('B', i)" class="text-red-400 hover:text-red-600 text-xs ml-auto">&#x2715;</button>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <input v-model="tmInputB.min" inputmode="numeric" maxlength="2" placeholder="min" class="w-12 text-center text-sm font-mono border border-gray-300 rounded py-1 outline-none focus:ring-2 focus:ring-orange-400" />
+                    <span class="text-gray-400">:</span>
+                    <input v-model="tmInputB.seg" inputmode="numeric" maxlength="2" placeholder="seg" class="w-12 text-center text-sm font-mono border border-gray-300 rounded py-1 outline-none focus:ring-2 focus:ring-orange-400" />
+                    <button @click="agregarTM('B')" class="text-xs bg-orange-100 hover:bg-orange-200 text-orange-700 px-2 py-1 rounded font-medium">+ TM</button>
                   </div>
                 </div>
               </div>
-              <button @click="guardarTramo('A')"
-                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-lg transition-colors">
-                Guardar Tramo {{ fecha?.tipo_pista === 'doble' ? 'A' : '' }}
-              </button>
             </div>
 
-            <!-- Tramo B -->
-            <div v-if="fecha?.tipo_pista === 'doble'" class="bg-gray-50 rounded-lg p-3 space-y-2">
-              <p class="text-xs text-gray-500 font-medium uppercase">Tramo B</p>
-              <div class="flex items-center gap-1">
-                <input v-model="tramoB.tiempo_min" data-ref="b-min" inputmode="numeric" maxlength="2" placeholder="00"
-                  @input="autotab($event, 'b-sec')"
-                  class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
-                <span class="text-xl text-gray-400 font-bold">:</span>
-                <input v-model="tramoB.tiempo_sec" data-ref="b-sec" inputmode="numeric" maxlength="2" placeholder="00"
-                  @input="autotab($event, 'b-cc')"
-                  class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
-                <span class="text-xl text-gray-400 font-bold">:</span>
-                <input v-model="tramoB.tiempo_ms" data-ref="b-cc" inputmode="numeric" maxlength="2" placeholder="00"
-                  class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="text-xs text-gray-400">Estacas</label>
-                  <div class="flex items-center gap-2">
-                    <button @click="tramoB.estacas = Math.max(0, tramoB.estacas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
-                    <span class="text-xl font-mono w-6 text-center">{{ tramoB.estacas }}</span>
-                    <button @click="tramoB.estacas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
-                  </div>
-                </div>
-                <div>
-                  <label class="text-xs text-gray-400">Cintas</label>
-                  <div class="flex items-center gap-2">
-                    <button @click="tramoB.cintas = Math.max(0, tramoB.cintas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
-                    <span class="text-xl font-mono w-6 text-center">{{ tramoB.cintas }}</span>
-                    <button @click="tramoB.cintas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
-                  </div>
-                </div>
-              </div>
-              <button @click="guardarTramo('B')"
-                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-lg transition-colors">
-                Guardar Tramo B
-              </button>
-            </div>
+            <!-- Guardar ambos tramos (pista doble) -->
+            <button v-if="esDobleCategoria" @click="guardarVuelta"
+              class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg text-lg transition-colors">
+              Guardar Vuelta V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }}
+            </button>
 
             <!-- Anular vuelta -->
             <button @click="anularVuelta"
