@@ -29,7 +29,7 @@
 #define RELE_ROJO1  13
 #define RELE_ROJO2  14
 #define RELE_ROJO3  4
-#define RELE_VERDE  17
+#define RELE_VERDE  25
 
 // Protocolo LoRa
 #define MAGIC         0xA5
@@ -253,7 +253,6 @@ void procesarComandoSerial() {
 
 void setup() {
   Serial.begin(115200);
-  pinMode(LED_PIN, OUTPUT);
 
   // Reles OFF antes de todo
   pinMode(RELE_ROJO1, OUTPUT); digitalWrite(RELE_ROJO1, HIGH);
