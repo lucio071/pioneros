@@ -311,7 +311,7 @@ async function fetchCronoEstado() {
     const res = await apiFetch<any[]>("/dispositivos-cronometro")
     dispositivos.value = (res.data || []).map((d: any) => {
       const ago = d.ultimo_visto_at ? Math.floor((Date.now() - new Date(d.ultimo_visto_at).getTime()) / 1000) : null
-      return { ...d, online: ago !== null && ago < 30, segundos_ago: ago }
+      return { ...d, online: ago !== null && ago < 60, segundos_ago: ago }
     })
   } catch {}
 
