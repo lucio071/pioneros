@@ -101,6 +101,47 @@ function iniciarParManual() {
 
   pistaATrip.value = null
   pistaBTrip.value = null
+
+  // Persistir par activo
+  guardarParActivo()
+}
+
+function guardarParActivo() {
+  if (selectedTrip.value) {
+    const data: any = {
+      tripAId: selectedTrip.value.id,
+      tripBId: selectedTripB.value?.id || null,
+      vuelta: selectedVuelta.value,
+      corrida: corridaActual.value,
+      corrida1Guardada: corrida1Guardada.value,
+      catId: selectedCatId.value,
+    }
+    localStorage.setItem('pioneros_par_activo', JSON.stringify(data))
+  }
+}
+
+function limpiarParActivo() {
+  localStorage.removeItem('pioneros_par_activo')
+}
+
+function restaurarParActivo() {
+  const saved = localStorage.getItem('pioneros_par_activo')
+  if (!saved) return
+  try {
+    const data = JSON.parse(saved)
+    if (data.catId !== selectedCatId.value) { limpiarParActivo(); return }
+    const tripA = tripulaciones.value.find((t: any) => t.id === data.tripAId)
+    if (!tripA) { limpiarParActivo(); return }
+    selectedTrip.value = tripA
+    if (data.tripBId) {
+      selectedTripB.value = tripulaciones.value.find((t: any) => t.id === data.tripBId) || null
+    }
+    selectedVuelta.value = data.vuelta || 1
+    corridaActual.value = data.corrida || 1
+    corrida1Guardada.value = data.corrida1Guardada || false
+    startCronoPolling()
+    resetTramoForms()
+  } catch { limpiarParActivo() }
 }
 
 function initOrdenList() {
@@ -164,6 +205,7 @@ async function cambiarACorrida2() {
   await apiMutate('POST', '/cronometro/crono-a/comando', { tipo: 'set_tripulacion', payload: { numero: Number(selectedTripB.value.numero), vuelta: selectedVuelta.value } }).catch(() => {})
   await apiMutate('POST', '/cronometro/crono-b/comando', { tipo: 'set_tripulacion', payload: { numero: Number(selectedTrip.value.numero), vuelta: selectedVuelta.value } }).catch(() => {})
   showToast('Corrida 2: se cambiaron de pista')
+  guardarParActivo()
 }
 
 async function guardarCorrida() {
@@ -211,6 +253,8 @@ async function guardarCorrida() {
     if (corridaActual.value === 1 && tripB) {
       corrida1Guardada.value = true
       cambiarACorrida2()
+    } else {
+      guardarParActivo()
     }
   } catch (e: any) {
     if (!navigator.onLine) {
@@ -371,6 +415,11 @@ async function load() {
   }
   loading.value = false
   await offline.loadPending()
+
+  // Restaurar par activo si hay uno guardado
+  if (tab.value === 'cronometraje' && !selectedTrip.value) {
+    restaurarParActivo()
+  }
 }
 
 async function loadRanking() {
@@ -683,7 +732,7 @@ if (typeof window !== 'undefined') {
         </div>
         <div class="flex gap-1">
           <button v-for="t in (['config', 'inscripcion', 'cronometraje', 'ranking'] as const)" :key="t"
-            @click="tab = t; selectedTrip = null"
+            @click="tab = t; if (t === 'cronometraje') { startCronoPolling(); restaurarParActivo() } else { selectedTrip = null; selectedTripB = null; stopCronoPolling() }"
             :class="['px-3 py-1.5 rounded-t-lg text-xs font-medium transition-colors',
               tab === t ? 'bg-gray-50 text-gray-800' : 'text-white/60 hover:text-white']">
             {{ { config: 'Config', inscripcion: 'Inscripcion', cronometraje: 'Crono', ranking: 'Ranking' }[t] }}
@@ -961,7 +1010,7 @@ if (typeof window !== 'undefined') {
 
         <!-- Trip selected: entry form -->
         <template v-else>
-          <button @click="selectedTrip = null; selectedTripB = null; corridaActual = 1; stopCronoPolling(); enviarNumeroTripulacion(0)" class="text-sm text-blue-600">&larr; Volver</button>
+          <button @click="selectedTrip = null; selectedTripB = null; corridaActual = 1; stopCronoPolling(); enviarNumeroTripulacion(0); limpiarParActivo()" class="text-sm text-blue-600">&larr; Volver</button>
 
           <div class="bg-white rounded-xl p-4 shadow-sm space-y-4">
 
