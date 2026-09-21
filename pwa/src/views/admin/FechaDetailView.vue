@@ -59,21 +59,40 @@ function asignarPista(t: any) {
   }
 }
 
+const corridaActual = ref<1 | 2>(1)
+
+// Quien corre en cada pista segun la corrida
+const tripEnPistaA = computed(() => {
+  if (!selectedTrip.value || !selectedTripB.value) return selectedTrip.value
+  return corridaActual.value === 1 ? selectedTrip.value : selectedTripB.value
+})
+const tripEnPistaB = computed(() => {
+  if (!selectedTrip.value || !selectedTripB.value) return null
+  return corridaActual.value === 1 ? selectedTripB.value : selectedTrip.value
+})
+
 function iniciarParManual() {
   if (!pistaATrip.value) return
   const tripA = pistaATrip.value
   const tripB = pistaBTrip.value
 
-  // Guardar trip B para mostrar en cronometraje
   selectedTripB.value = tripB
+  corridaActual.value = 1
+  startCronoPolling()
 
   // Seleccionar trip A como principal
-  selectTrip(tripA)
+  selectedTrip.value = tripA
+  const done = (tripA.vueltas || []).filter((v: any) => v.fase === 'clasificacion').map((v: any) => v.numero_vuelta)
+  for (let i = 1; i <= (fecha.value?.vueltas_clasificacion || 1); i++) {
+    if (!done.includes(i)) { selectedVuelta.value = i; break }
+  }
+  if (done.length >= (fecha.value?.vueltas_clasificacion || 1)) {
+    selectedVuelta.value = done.length > 0 ? done[done.length - 1] : 1
+  }
+  resetTramoForms()
 
-  // Mandar numero al crono-a
-  enviarNumeroTripulacion(tripA.numero)
-
-  // Si hay trip B, mandar al crono-b
+  // Mandar numeros a cronometros fisicos
+  apiMutate('POST', '/cronometro/crono-a/comando', { tipo: 'set_tripulacion', payload: { numero: Number(tripA.numero), vuelta: selectedVuelta.value } }).catch(() => {})
   if (tripB) {
     apiMutate('POST', '/cronometro/crono-b/comando', { tipo: 'set_tripulacion', payload: { numero: Number(tripB.numero), vuelta: selectedVuelta.value } }).catch(() => {})
   }
@@ -128,74 +147,89 @@ async function guardarOrden() {
   initOrdenList()
 }
 
-// Heat mode (pista doble)
-const selectedHeat = ref<any>(null)
-const heatCorrida = ref<1 | 2>(1)
-const heatStartTime = ref<number | null>(null)
-
 const esDobleCategoria = computed(() => {
   const fc = selectedCat.value
   if (fc?.tipo_pista) return fc.tipo_pista === 'doble'
   return fecha.value?.tipo_pista === 'doble'
 })
 
-function selectHeat(par: any[], heatIndex: number) {
-  selectedHeat.value = { index: heatIndex, tripA: par[0], tripB: par[1] || null }
-  heatCorrida.value = 1
-  heatStartTime.value = null
-  startCronoPolling()
-  // Send trip numbers to cronometros
-  enviarNumeroTripulacion(par[0].numero)
-  if (par[1]) {
-    apiMutate('POST', '/cronometro/crono-b/comando', { tipo: 'set_tripulacion', payload: { numero: Number(par[1].numero), vuelta: selectedVuelta.value } }).catch(() => {})
-  }
-}
-
-function deseleccionarHeat() {
-  selectedHeat.value = null
-  stopCronoPolling()
-  enviarNumeroTripulacion(0)
-}
-
 async function cambiarACorrida2() {
-  if (!selectedHeat.value) return
-  heatCorrida.value = 2
-  // Reset cronos
+  if (!selectedTrip.value || !selectedTripB.value) return
+  corridaActual.value = 2
+  resetTramoForms()
   await enviarComandoCrono('reset')
-  // Invertir: tripB va a pista A, tripA va a pista B
-  const { tripA, tripB } = selectedHeat.value
-  if (tripB) {
-    await apiMutate('POST', '/cronometro/crono-a/comando', { tipo: 'set_tripulacion', payload: { numero: Number(tripB.numero), vuelta: selectedVuelta.value } }).catch(() => {})
-    await apiMutate('POST', '/cronometro/crono-b/comando', { tipo: 'set_tripulacion', payload: { numero: Number(tripA.numero), vuelta: selectedVuelta.value } }).catch(() => {})
+  // Invertir cronometros fisicos: tripB en crono-a, tripA en crono-b
+  await apiMutate('POST', '/cronometro/crono-a/comando', { tipo: 'set_tripulacion', payload: { numero: Number(selectedTripB.value.numero), vuelta: selectedVuelta.value } }).catch(() => {})
+  await apiMutate('POST', '/cronometro/crono-b/comando', { tipo: 'set_tripulacion', payload: { numero: Number(selectedTrip.value.numero), vuelta: selectedVuelta.value } }).catch(() => {})
+  showToast('Corrida 2: se cambiaron de pista')
+}
+
+async function guardarCorrida() {
+  if (!selectedTrip.value) return
+  const tripA = selectedTrip.value   // trip original pista A
+  const tripB = selectedTripB.value  // trip original pista B
+
+  const bodyPistaA = {
+    tiempo_ms: tramoToMs(tramoA.value),
+    estacas: tramoA.value.estacas,
+    cintas: tramoA.value.cintas,
+    tiempos_muertos: tramoA.value.tiempos_muertos,
+  }
+  const bodyPistaB = tripB ? {
+    tiempo_ms: tramoToMs(tramoB.value),
+    estacas: tramoB.value.estacas,
+    cintas: tramoB.value.cintas,
+    tiempos_muertos: tramoB.value.tiempos_muertos,
+  } : null
+
+  try {
+    if (corridaActual.value === 1) {
+      // Corrida 1: tripA corre pistaA (su tramo A), tripB corre pistaB (su tramo B)
+      await apiMutate('PUT', `/tripulaciones/${tripA.id}/vueltas/${selectedVuelta.value}/tramos/A`, bodyPistaA)
+      if (tripB && bodyPistaB) {
+        await apiMutate('PUT', `/tripulaciones/${tripB.id}/vueltas/${selectedVuelta.value}/tramos/B`, bodyPistaB)
+      }
+    } else {
+      // Corrida 2: tripB corre pistaA (su tramo A), tripA corre pistaB (su tramo B)
+      if (tripB && bodyPistaA) {
+        await apiMutate('PUT', `/tripulaciones/${tripB.id}/vueltas/${selectedVuelta.value}/tramos/A`, bodyPistaA)
+      }
+      await apiMutate('PUT', `/tripulaciones/${tripA.id}/vueltas/${selectedVuelta.value}/tramos/B`, bodyPistaB || bodyPistaA)
+    }
+
+    if (navigator.vibrate) navigator.vibrate([50, 50, 50])
+    showToast(`Corrida ${corridaActual.value} guardada`)
+    resetTramoForms()
+    await load()
+    // Refrescar datos de las trips
+    selectedTrip.value = tripulaciones.value.find((t: any) => t.id === tripA.id) || null
+    if (tripB) selectedTripB.value = tripulaciones.value.find((t: any) => t.id === tripB.id) || null
+
+    // Si fue corrida 1, auto-pasar a corrida 2
+    if (corridaActual.value === 1 && tripB) {
+      cambiarACorrida2()
+    }
+  } catch (e: any) {
+    if (!navigator.onLine) {
+      showToast('Sin conexion - no se pudo guardar', 'error')
+    } else {
+      showToast(e.message || 'Error al guardar corrida', 'error')
+    }
   }
 }
 
-async function guardarTiempoHeat(corridaNum: 1 | 2) {
-  if (!selectedHeat.value) return
-  const { tripA, tripB } = selectedHeat.value
-
-  // Parse tiempos de los inputs
-  const msA = tramoToMs(tramoA.value)
-  const msB = tripB ? tramoToMs(tramoB.value) : 0
-
-  if (corridaNum === 1) {
-    // Corrida 1: tripA corre pistaA, tripB corre pistaB
-    await apiMutate('PUT', `/tripulaciones/${tripA.id}/vueltas/${selectedVuelta.value}/tramos/A`, { tiempo_ms: msA, estacas: tramoA.value.estacas, cintas: tramoA.value.cintas })
-    if (tripB) {
-      await apiMutate('PUT', `/tripulaciones/${tripB.id}/vueltas/${selectedVuelta.value}/tramos/B`, { tiempo_ms: msB, estacas: tramoB.value.estacas, cintas: tramoB.value.cintas })
-    }
-  } else {
-    // Corrida 2: tripB corre pistaA, tripA corre pistaB (invertidos)
-    if (tripB) {
-      await apiMutate('PUT', `/tripulaciones/${tripB.id}/vueltas/${selectedVuelta.value}/tramos/A`, { tiempo_ms: msA, estacas: tramoA.value.estacas, cintas: tramoA.value.cintas })
-    }
-    await apiMutate('PUT', `/tripulaciones/${tripA.id}/vueltas/${selectedVuelta.value}/tramos/B`, { tiempo_ms: msB, estacas: tramoB.value.estacas, cintas: tramoB.value.cintas })
+async function salioAPistaDoble() {
+  if (!selectedTrip.value) return
+  await apiMutate('POST', `/tripulaciones/${selectedTrip.value.id}/salio-a-pista`)
+  if (selectedTripB.value) {
+    await apiMutate('POST', `/tripulaciones/${selectedTripB.value.id}/salio-a-pista`)
   }
-
-  if (navigator.vibrate) navigator.vibrate(50)
-  showToast(`Corrida ${corridaNum} guardada`)
-  resetTramoForms()
+  showToast('Ambos marcados en pista')
   await load()
+  selectedTrip.value = tripulaciones.value.find((t: any) => t.id === selectedTrip.value?.id) || null
+  if (selectedTripB.value) {
+    selectedTripB.value = tripulaciones.value.find((t: any) => t.id === selectedTripB.value?.id) || null
+  }
 }
 
 const selectedTrip = ref<any>(null)
@@ -505,47 +539,7 @@ async function guardarTramo(letra: 'A' | 'B') {
   }
 }
 
-async function guardarVuelta() {
-  if (!selectedTrip.value) return
-  const tripId = selectedTrip.value.id
-  const vuelta = selectedVuelta.value
 
-  const bodyA = {
-    tiempo_ms: tramoToMs(tramoA.value),
-    estacas: tramoA.value.estacas,
-    cintas: tramoA.value.cintas,
-    tiempos_muertos: tramoA.value.tiempos_muertos,
-  }
-  const bodyB = {
-    tiempo_ms: tramoToMs(tramoB.value),
-    estacas: tramoB.value.estacas,
-    cintas: tramoB.value.cintas,
-    tiempos_muertos: tramoB.value.tiempos_muertos,
-  }
-
-  const pathA = `/tripulaciones/${tripId}/vueltas/${vuelta}/tramos/A`
-  const pathB = `/tripulaciones/${tripId}/vueltas/${vuelta}/tramos/B`
-
-  try {
-    await Promise.all([
-      apiMutate('PUT', pathA, bodyA),
-      apiMutate('PUT', pathB, bodyB),
-    ])
-    if (navigator.vibrate) navigator.vibrate([50, 50, 50])
-    showToast(`Vuelta V${vuelta === 99 ? 'F' : vuelta} guardada (A + B)`)
-    resetTramoForms()
-    await load()
-    selectedTrip.value = tripulaciones.value.find((t: any) => t.id === tripId) || null
-  } catch (e: any) {
-    if (!navigator.onLine) {
-      await offline.enqueue('PUT', pathA, bodyA)
-      await offline.enqueue('PUT', pathB, bodyB)
-      showToast('Sin conexion - guardado en cola')
-    } else {
-      showToast(e.message || 'Error al guardar vuelta', 'error')
-    }
-  }
-}
 
 async function anularVuelta() {
   if (!selectedTrip.value) return
@@ -964,23 +958,43 @@ if (typeof window !== 'undefined') {
 
         <!-- Trip selected: entry form -->
         <template v-else>
-          <button @click="selectedTrip = null; selectedTripB = null; stopCronoPolling(); enviarNumeroTripulacion(0)" class="text-sm text-blue-600">&larr; Volver</button>
+          <button @click="selectedTrip = null; selectedTripB = null; corridaActual = 1; stopCronoPolling(); enviarNumeroTripulacion(0)" class="text-sm text-blue-600">&larr; Volver</button>
 
           <div class="bg-white rounded-xl p-4 shadow-sm space-y-4">
-            <div v-if="selectedTripB" class="grid grid-cols-2 gap-2">
-              <div class="bg-blue-50 rounded-lg p-2 text-center border border-blue-200">
-                <p class="text-[10px] text-blue-500 font-medium">PISTA A</p>
-                <p class="font-bold text-xl text-gray-800">#{{ selectedTrip.numero }}</p>
-                <p class="text-xs text-gray-600">{{ selectedTrip.nombre }}</p>
-                <p class="text-[10px] text-gray-400">{{ selectedTrip.piloto }}</p>
+
+            <!-- ===== HEADER PISTA DOBLE: muestra quien corre en cada pista ESTA corrida ===== -->
+            <template v-if="selectedTripB">
+              <!-- Indicador de corrida -->
+              <div class="flex items-center justify-center gap-2">
+                <button @click="corridaActual = 1; resetTramoForms()"
+                  :class="['px-4 py-1.5 rounded-lg text-sm font-bold transition-colors',
+                    corridaActual === 1 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500']">
+                  Corrida 1
+                </button>
+                <button @click="cambiarACorrida2()"
+                  :class="['px-4 py-1.5 rounded-lg text-sm font-bold transition-colors',
+                    corridaActual === 2 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500']">
+                  Corrida 2
+                </button>
               </div>
-              <div class="bg-amber-50 rounded-lg p-2 text-center border border-amber-200">
-                <p class="text-[10px] text-amber-500 font-medium">PISTA B</p>
-                <p class="font-bold text-xl text-gray-800">#{{ selectedTripB.numero }}</p>
-                <p class="text-xs text-gray-600">{{ selectedTripB.nombre }}</p>
-                <p class="text-[10px] text-gray-400">{{ selectedTripB.piloto }}</p>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="bg-blue-50 rounded-lg p-2 text-center border-2 border-blue-300">
+                  <p class="text-[10px] text-blue-500 font-bold uppercase">Pista A</p>
+                  <p class="font-bold text-2xl text-gray-800">#{{ tripEnPistaA?.numero }}</p>
+                  <p class="text-xs text-gray-600 truncate">{{ tripEnPistaA?.nombre }}</p>
+                </div>
+                <div class="bg-amber-50 rounded-lg p-2 text-center border-2 border-amber-300">
+                  <p class="text-[10px] text-amber-500 font-bold uppercase">Pista B</p>
+                  <p class="font-bold text-2xl text-gray-800">#{{ tripEnPistaB?.numero }}</p>
+                  <p class="text-xs text-gray-600 truncate">{{ tripEnPistaB?.nombre }}</p>
+                </div>
               </div>
-            </div>
+              <p class="text-center text-xs text-gray-400">
+                Corrida {{ corridaActual }}: #{{ tripEnPistaA?.numero }} en A, #{{ tripEnPistaB?.numero }} en B
+              </p>
+            </template>
+
+            <!-- ===== HEADER PISTA SIMPLE ===== -->
             <div v-else class="flex items-center gap-3">
               <div class="w-14 h-14 bg-[var(--brand-color)] text-white rounded-lg flex items-center justify-center font-bold text-2xl">
                 {{ selectedTrip.numero }}
@@ -991,8 +1005,25 @@ if (typeof window !== 'undefined') {
               </div>
             </div>
 
-            <!-- Existing times -->
-            <div v-if="selectedTrip.vueltas?.length" class="bg-gray-50 rounded-lg p-2.5 space-y-1.5">
+            <!-- Tiempos cargados de ambas tripulaciones (doble) -->
+            <template v-if="selectedTripB">
+              <div class="grid grid-cols-2 gap-2">
+                <div v-for="trip in [selectedTrip, selectedTripB]" :key="trip.id" class="bg-gray-50 rounded-lg p-2 space-y-1">
+                  <p class="text-[10px] text-gray-400 font-medium">#{{ trip.numero }} - Tiempos</p>
+                  <div v-for="v in trip.vueltas" :key="v.id" class="text-xs">
+                    <span class="font-mono text-gray-700">V{{ v.numero_vuelta }}: {{ v.nula ? 'NULA' : formatTiempo(v.total_vuelta) }}</span>
+                    <div v-for="tr in v.tramos" :key="tr.id" class="text-[10px] text-gray-400 ml-2">
+                      {{ tr.letra }}: {{ formatTiempo(tr.tiempo_ms) }}
+                      <span v-if="tr.estacas || tr.cintas" class="text-orange-500">{{ tr.estacas }}E {{ tr.cintas }}C</span>
+                    </div>
+                  </div>
+                  <p v-if="!trip.vueltas?.length" class="text-[10px] text-gray-300">Sin tiempos</p>
+                </div>
+              </div>
+            </template>
+
+            <!-- Tiempos cargados (simple) -->
+            <div v-else-if="selectedTrip.vueltas?.length" class="bg-gray-50 rounded-lg p-2.5 space-y-1.5">
               <p class="text-[10px] text-gray-400 uppercase tracking-wider">Tiempos cargados</p>
               <div v-for="v in selectedTrip.vueltas" :key="v.id"
                 :class="['rounded-lg p-2 flex items-center justify-between',
@@ -1036,32 +1067,38 @@ if (typeof window !== 'undefined') {
               </div>
             </div>
 
-            <!-- Salio a pista -->
-            <button v-if="selectedTrip.estado === 'inscripta'" @click="salioAPista"
+            <!-- Salio a pista (doble: marca los dos) -->
+            <button v-if="selectedTripB && (selectedTrip.estado === 'inscripta' || selectedTripB.estado === 'inscripta')"
+              @click="salioAPistaDoble"
+              class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-lg text-lg">
+              Salieron a pista (#{{ selectedTrip.numero }} + #{{ selectedTripB.numero }})
+            </button>
+            <button v-else-if="!selectedTripB && selectedTrip.estado === 'inscripta'" @click="salioAPista"
               class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-lg text-lg">
               Salio a pista
             </button>
 
             <!-- Vuelta selector -->
             <div class="flex gap-1.5 overflow-x-auto">
-              <button v-for="n in (fecha?.vueltas_clasificacion || 0)" :key="n" @click="selectedVuelta = n; resetTramoForms()"
+              <button v-for="n in (fecha?.vueltas_clasificacion || 0)" :key="n" @click="selectedVuelta = n; corridaActual = 1; resetTramoForms()"
                 :class="['px-3 py-1.5 rounded-lg text-sm font-medium',
                   selectedVuelta === n ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600']">
                 V{{ n }}
               </button>
-              <button v-if="selectedCat?.fase === 'final'" @click="selectedVuelta = 99; resetTramoForms()"
+              <button v-if="selectedCat?.fase === 'final'" @click="selectedVuelta = 99; corridaActual = 1; resetTramoForms()"
                 :class="['px-3 py-1.5 rounded-lg text-sm font-medium',
                   selectedVuelta === 99 ? 'bg-orange-600 text-white' : 'bg-orange-100 text-orange-700']">
                 Final
               </button>
             </div>
 
-            <!-- Tramos A + B juntos -->
-            <div :class="['gap-3', esDobleCategoria ? 'grid grid-cols-1 sm:grid-cols-2' : '']">
-              <!-- Tramo A -->
-              <div class="bg-gray-50 rounded-lg p-3 space-y-2">
-                <p :class="['text-xs font-medium uppercase', esDobleCategoria ? 'text-blue-500' : 'text-gray-500']">
-                  {{ esDobleCategoria ? 'Pista A' : 'Tiempo' }}
+            <!-- ===== FORMULARIOS DE TIEMPO ===== -->
+            <div :class="['gap-3', selectedTripB ? 'grid grid-cols-1 sm:grid-cols-2' : '']">
+
+              <!-- Pista A -->
+              <div :class="['rounded-lg p-3 space-y-2', selectedTripB ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50']">
+                <p :class="['text-xs font-bold uppercase', selectedTripB ? 'text-blue-600' : 'text-gray-500']">
+                  {{ selectedTripB ? 'Pista A — #' + tripEnPistaA?.numero : 'Tiempo' }}
                 </p>
                 <div class="flex items-center gap-1">
                   <input v-model="tramoA.tiempo_min" data-ref="a-min" inputmode="numeric" maxlength="2" placeholder="00"
@@ -1073,9 +1110,8 @@ if (typeof window !== 'undefined') {
                     class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
                   <span class="text-xl text-gray-400 font-bold">:</span>
                   <input v-model="tramoA.tiempo_ms" data-ref="a-cc" inputmode="numeric" maxlength="2" placeholder="00"
-                    :class="['w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500',
-                      esDobleCategoria ? '' : '']"
-                    @input="esDobleCategoria ? autotab($event, 'b-min') : undefined" />
+                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+                    @input="selectedTripB ? autotab($event, 'b-min') : undefined" />
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                   <div>
@@ -1095,9 +1131,9 @@ if (typeof window !== 'undefined') {
                     </div>
                   </div>
                 </div>
-                <!-- Tiempos muertos A -->
+                <!-- Tiempos muertos -->
                 <div class="space-y-1">
-                  <label class="text-xs text-orange-500 font-medium">Tiempos muertos (se restan)</label>
+                  <label class="text-xs text-orange-500 font-medium">Tiempos muertos</label>
                   <div v-for="(tm, i) in tramoA.tiempos_muertos" :key="i" class="flex items-center gap-2 bg-orange-50 rounded px-2 py-1">
                     <span class="text-sm font-mono text-orange-700">-{{ Math.floor(tm/60) }}:{{ String(tm%60).padStart(2,'0') }}</span>
                     <button @click="quitarTM('A', i)" class="text-red-400 hover:text-red-600 text-xs ml-auto">&#x2715;</button>
@@ -1109,26 +1145,27 @@ if (typeof window !== 'undefined') {
                     <button @click="agregarTM('A')" class="text-xs bg-orange-100 hover:bg-orange-200 text-orange-700 px-2 py-1 rounded font-medium">+ TM</button>
                   </div>
                 </div>
-                <button v-if="!esDobleCategoria" @click="guardarTramo('A')"
+                <!-- Guardar individual (solo pista simple) -->
+                <button v-if="!selectedTripB" @click="guardarTramo('A')"
                   class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-lg transition-colors">
                   Guardar
                 </button>
               </div>
 
-              <!-- Tramo B (solo pista doble) -->
-              <div v-if="esDobleCategoria" class="bg-gray-50 rounded-lg p-3 space-y-2">
-                <p class="text-xs text-amber-500 font-medium uppercase">Pista B</p>
+              <!-- Pista B (solo doble) -->
+              <div v-if="selectedTripB" class="bg-amber-50 rounded-lg p-3 space-y-2 border border-amber-200">
+                <p class="text-xs text-amber-600 font-bold uppercase">Pista B — #{{ tripEnPistaB?.numero }}</p>
                 <div class="flex items-center gap-1">
                   <input v-model="tramoB.tiempo_min" data-ref="b-min" inputmode="numeric" maxlength="2" placeholder="00"
                     @input="autotab($event, 'b-sec')"
-                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
+                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-amber-500" />
                   <span class="text-xl text-gray-400 font-bold">:</span>
                   <input v-model="tramoB.tiempo_sec" data-ref="b-sec" inputmode="numeric" maxlength="2" placeholder="00"
                     @input="autotab($event, 'b-cc')"
-                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
+                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-amber-500" />
                   <span class="text-xl text-gray-400 font-bold">:</span>
                   <input v-model="tramoB.tiempo_ms" data-ref="b-cc" inputmode="numeric" maxlength="2" placeholder="00"
-                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
+                    class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-amber-500" />
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                   <div>
@@ -1150,7 +1187,7 @@ if (typeof window !== 'undefined') {
                 </div>
                 <!-- Tiempos muertos B -->
                 <div class="space-y-1">
-                  <label class="text-xs text-orange-500 font-medium">Tiempos muertos (se restan)</label>
+                  <label class="text-xs text-orange-500 font-medium">Tiempos muertos</label>
                   <div v-for="(tm, i) in tramoB.tiempos_muertos" :key="i" class="flex items-center gap-2 bg-orange-50 rounded px-2 py-1">
                     <span class="text-sm font-mono text-orange-700">-{{ Math.floor(tm/60) }}:{{ String(tm%60).padStart(2,'0') }}</span>
                     <button @click="quitarTM('B', i)" class="text-red-400 hover:text-red-600 text-xs ml-auto">&#x2715;</button>
@@ -1165,10 +1202,10 @@ if (typeof window !== 'undefined') {
               </div>
             </div>
 
-            <!-- Guardar ambos tramos (pista doble) -->
-            <button v-if="esDobleCategoria" @click="guardarVuelta"
+            <!-- Guardar corrida (pista doble) -->
+            <button v-if="selectedTripB" @click="guardarCorrida"
               class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg text-lg transition-colors">
-              Guardar Vuelta V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }}
+              Guardar Corrida {{ corridaActual }} — V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }}
             </button>
 
             <!-- Anular vuelta -->
