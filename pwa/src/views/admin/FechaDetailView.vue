@@ -319,11 +319,18 @@ async function fetchCronoEstado() {
   if (selectedTrip.value || selectedTripB.value) {
     try {
       await loadRanking()
+      const oldTripA = selectedTrip.value
+      const oldTripB = selectedTripB.value
       if (selectedTrip.value) {
         selectedTrip.value = tripulaciones.value.find((t: any) => t.id === selectedTrip.value?.id) || selectedTrip.value
       }
       if (selectedTripB.value) {
         selectedTripB.value = tripulaciones.value.find((t: any) => t.id === selectedTripB.value?.id) || selectedTripB.value
+      }
+      // Si cambiaron los datos, actualizar formularios (solo si el usuario no editó)
+      const formVacio = !tramoA.value.tiempo_min && !tramoA.value.tiempo_sec && !tramoB.value.tiempo_min && !tramoB.value.tiempo_sec
+      if (formVacio) {
+        resetTramoForms()
       }
     } catch {}
   }
@@ -590,29 +597,45 @@ function selectTrip(t: any) {
   resetTramoForms()
 }
 
+function cargarTramoEnForm(form: any, tr: any) {
+  const ms = tr.tiempo_ms || 0
+  const totalSec = Math.floor(ms / 1000)
+  form.value.tiempo_min = totalSec >= 60 ? String(Math.floor(totalSec / 60)) : ''
+  form.value.tiempo_sec = String(totalSec % 60) || ''
+  form.value.tiempo_ms = String(Math.floor((ms % 1000) / 10)) || ''
+  form.value.estacas = tr.estacas || 0
+  form.value.cintas = tr.cintas || 0
+  form.value.tiempos_muertos = (tr.tiempos_muertos || []).map((tm: any) => tm.segundos || tm)
+}
+
+function buscarTramo(trip: any, letra: string) {
+  if (!trip) return null
+  const fase = selectedVuelta.value === 99 ? 'final' : 'clasificacion'
+  const vuelta = (trip.vueltas || []).find((v: any) => v.numero_vuelta === selectedVuelta.value && v.fase === fase)
+  if (!vuelta?.tramos) return null
+  return vuelta.tramos.find((tr: any) => tr.letra === letra)
+}
+
 function resetTramoForms() {
   tramoA.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] }
   tramoB.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] }
   tmInputA.value = { min: '', seg: '' }
   tmInputB.value = { min: '', seg: '' }
 
-  // Precargar datos existentes de la vuelta seleccionada
-  if (selectedTrip.value) {
-    const vuelta = (selectedTrip.value.vueltas || []).find((v: any) =>
-      v.numero_vuelta === selectedVuelta.value && v.fase === (selectedVuelta.value === 99 ? 'final' : 'clasificacion'))
-    if (vuelta?.tramos) {
-      for (const tr of vuelta.tramos) {
-        const form = tr.letra === 'A' ? tramoA : tramoB
-        const ms = tr.tiempo_ms || 0
-        const totalSec = Math.floor(ms / 1000)
-        form.value.tiempo_min = totalSec >= 60 ? String(Math.floor(totalSec / 60)) : ''
-        form.value.tiempo_sec = String(totalSec % 60) || ''
-        form.value.tiempo_ms = String(Math.floor((ms % 1000) / 10)) || ''
-        form.value.estacas = tr.estacas || 0
-        form.value.cintas = tr.cintas || 0
-        form.value.tiempos_muertos = (tr.tiempos_muertos || []).map((tm: any) => tm.segundos || tm)
-      }
-    }
+  if (selectedTripB.value) {
+    // Pista doble: buscar tramo segun quien corre en cada pista esta corrida
+    const tripA = tripEnPistaA.value
+    const tripB = tripEnPistaB.value
+    const letraA = corridaActual.value === 1 ? 'A' : 'B'
+    const letraB = corridaActual.value === 1 ? 'B' : 'A'
+    const trA = buscarTramo(tripA, letraA)
+    const trB = buscarTramo(tripB, letraB)
+    if (trA) cargarTramoEnForm(tramoA, trA)
+    if (trB) cargarTramoEnForm(tramoB, trB)
+  } else if (selectedTrip.value) {
+    // Pista simple
+    const trA = buscarTramo(selectedTrip.value, 'A')
+    if (trA) cargarTramoEnForm(tramoA, trA)
   }
 }
 
