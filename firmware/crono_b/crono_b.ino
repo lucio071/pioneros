@@ -27,7 +27,7 @@
 // ================== CONSTANTES ==================
 #define API_URL    "http://192.168.100.5"
 #define HTTP_TIMEOUT_MS        2000
-#define POLL_INTERVAL_MS       2000
+#define POLL_INTERVAL_MS       500
 #define HEARTBEAT_INTERVAL_MS  5000
 
 // ================== DISPLAY ==================

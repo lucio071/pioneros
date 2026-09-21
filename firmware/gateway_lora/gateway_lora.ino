@@ -191,7 +191,11 @@ void consultarComandos(const char* token, uint8_t dst_id) {
           uint16_t dur = 20;
           enviarComandoLoRa(dst_id, CMD_HABILITAR_SENSOR, (uint8_t*)&dur, 2);
         } else if (strcmp(tipo, "semaforo_largada") == 0) {
-          enviarComandoLoRa(dst_id, CMD_SEMAFORO_LARGADA, NULL, 0);
+          // Enviar 3 veces para asegurar que llegue
+          for (int r = 0; r < 3; r++) {
+            enviarComandoLoRa(dst_id, CMD_SEMAFORO_LARGADA, NULL, 0);
+            if (r < 2) delay(200);
+          }
         } else if (strcmp(tipo, "reset") == 0) {
           enviarComandoLoRa(dst_id, CMD_RESET, NULL, 0);
         }

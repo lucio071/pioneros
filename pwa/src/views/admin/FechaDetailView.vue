@@ -314,6 +314,19 @@ async function fetchCronoEstado() {
       return { ...d, online: ago !== null && ago < 30, segundos_ago: ago }
     })
   } catch {}
+
+  // Recargar datos de tripulaciones para ver tiempos del sensor
+  if (selectedTrip.value || selectedTripB.value) {
+    try {
+      await loadRanking()
+      if (selectedTrip.value) {
+        selectedTrip.value = tripulaciones.value.find((t: any) => t.id === selectedTrip.value?.id) || selectedTrip.value
+      }
+      if (selectedTripB.value) {
+        selectedTripB.value = tripulaciones.value.find((t: any) => t.id === selectedTripB.value?.id) || selectedTripB.value
+      }
+    } catch {}
+  }
 }
 function startCronoPolling() {
   fetchCronoEstado()
