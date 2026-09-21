@@ -623,13 +623,14 @@ function resetTramoForms() {
   tmInputB.value = { min: '', seg: '' }
 
   if (selectedTripB.value) {
-    // Pista doble: buscar tramo segun quien corre en cada pista esta corrida
-    const tripA = tripEnPistaA.value
-    const tripB = tripEnPistaB.value
-    const letraA = corridaActual.value === 1 ? 'A' : 'B'
-    const letraB = corridaActual.value === 1 ? 'B' : 'A'
-    const trA = buscarTramo(tripA, letraA)
-    const trB = buscarTramo(tripB, letraB)
+    // Pista doble: en corrida 1 tripA corre pista A (su tramo A), tripB corre pista B (su tramo B)
+    // en corrida 2 tripB corre pista A (su tramo A), tripA corre pista B (su tramo B)
+    // Formulario Pista A muestra el tramo de quien corre en A
+    // Formulario Pista B muestra el tramo de quien corre en B
+    const tripEnA = corridaActual.value === 1 ? selectedTrip.value : selectedTripB.value
+    const tripEnB = corridaActual.value === 1 ? selectedTripB.value : selectedTrip.value
+    const trA = buscarTramo(tripEnA, 'A')
+    const trB = buscarTramo(tripEnB, 'B')
     if (trA) cargarTramoEnForm(tramoA, trA)
     if (trB) cargarTramoEnForm(tramoB, trB)
   } else if (selectedTrip.value) {
