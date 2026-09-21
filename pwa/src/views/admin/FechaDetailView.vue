@@ -339,6 +339,51 @@ async function enviarComandoCrono(tipo: string) {
   }
 }
 
+async function armarLargada() {
+  try {
+    if (selectedTripB.value) {
+      // Pista doble: usa endpoint que arma ambas pistas + semaforo + sensores
+      const tripA = tripEnPistaA.value
+      const tripB = tripEnPistaB.value
+      await apiMutate('POST', '/cronometro/armar-largada-doble', {
+        tripulacion_a_id: tripA.id,
+        tripulacion_b_id: tripB?.id || null,
+        vuelta_numero: selectedVuelta.value,
+        tramo_letra_a: corridaActual.value === 1 ? 'A' : 'B',
+        tramo_letra_b: corridaActual.value === 1 ? 'B' : 'A',
+      })
+    } else {
+      // Pista simple
+      await apiMutate('POST', '/cronometro/armar-largada', {
+        tripulacion_id: selectedTrip.value.id,
+        vuelta_numero: selectedVuelta.value,
+        crono_codigo: 'crono-a',
+        sensor_largada_codigo: 'sensor-a',
+        sensor_llegada_codigo: 'sensor-a',
+        tramo_letra: 'A',
+      })
+    }
+    if (navigator.vibrate) navigator.vibrate([100, 50, 100])
+    showToast('Largada armada: sensores + semaforo')
+  } catch (e: any) {
+    showToast(e.message || 'Error al armar largada', 'error')
+  }
+}
+
+async function armarLlegada() {
+  try {
+    if (selectedTripB.value) {
+      await apiMutate('POST', '/cronometro/armar-llegada-doble')
+    } else {
+      await apiMutate('POST', '/cronometro/armar-llegada')
+    }
+    if (navigator.vibrate) navigator.vibrate(50)
+    showToast('Llegada armada: sensores habilitados')
+  } catch (e: any) {
+    showToast(e.message || 'Error al armar llegada', 'error')
+  }
+}
+
 async function enviarNumeroTripulacion(numero: string | number) {
   const fc = selectedCat.value
   const esDoble = fc?.tipo_pista ? fc.tipo_pista === 'doble' : fecha.value?.tipo_pista === 'doble'
@@ -1105,11 +1150,11 @@ if (typeof window !== 'undefined') {
                 </div>
               </div>
               <div class="grid grid-cols-3 gap-2">
-                <button @click="enviarComandoCrono('start')"
+                <button @click="armarLargada"
                   class="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-2.5 rounded-lg transition-colors">
                   ARMAR LARGADA
                 </button>
-                <button @click="enviarComandoCrono('stop')"
+                <button @click="armarLlegada"
                   class="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-2.5 rounded-lg transition-colors">
                   ARMAR LLEGADA
                 </button>
