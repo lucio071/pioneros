@@ -369,8 +369,8 @@ async function armarLargada() {
         tripulacion_a_id: tripA.id,
         tripulacion_b_id: tripB?.id || null,
         vuelta_numero: selectedVuelta.value,
-        tramo_letra_a: corridaActual.value === 1 ? 'A' : 'B',
-        tramo_letra_b: corridaActual.value === 1 ? 'B' : 'A',
+        tramo_letra_a: 'A',
+        tramo_letra_b: 'B',
       })
     } else {
       // Pista simple
