@@ -446,37 +446,26 @@ function imprimirTiempo(trip: any, vuelta: any) {
   const pe = cat?.penal_estaca_seg || 5
   const pc = cat?.penal_cinta_seg || 10
   const catNom = cat?.categoria_catalogo?.nombre || cat?.nombre || ''
+  const vn = vuelta.numero_vuelta === 99 ? 'FINAL' : 'V' + vuelta.numero_vuelta
   const tramos = vuelta.tramos || []
-  let tramoHtml = ''
+  let lines = '   PIONEROS 4x4\n'
+  lines += '------------------------\n'
+  lines += '#' + trip.numero + ' ' + trip.nombre + '\n'
+  lines += trip.piloto + (trip.copiloto ? ' / ' + trip.copiloto : '') + '\n'
+  lines += '------------------------\n'
+  lines += vn + ' - ' + catNom + '\n'
   for (const tr of tramos) {
-    tramoHtml += '<div class="row"><span>Pista ' + tr.letra + ':</span><span>' + formatTiempo(tr.tiempo_ms) + '</span></div>'
+    lines += 'Pista ' + tr.letra + ':  ' + formatTiempo(tr.tiempo_ms) + '\n'
     if (tr.estacas || tr.cintas) {
       const pms = (tr.estacas * pe + tr.cintas * pc) * 1000
-      tramoHtml += '<div style="font-size:10px">&nbsp;&nbsp;E:' + tr.estacas + ' C:' + tr.cintas + ' (+' + formatTiempo(pms) + ')</div>'
+      lines += '  E:' + tr.estacas + ' C:' + tr.cintas + ' +' + formatTiempo(pms) + '\n'
     }
   }
-  const vn = vuelta.numero_vuelta === 99 ? 'FINAL' : vuelta.numero_vuelta
-  const now = new Date().toLocaleString()
-  const doc = [
-    '<html><head><style>',
-    'body{font-family:monospace;width:58mm;margin:0;padding:4px;font-size:12px}',
-    'h1{font-size:16px;margin:2px 0;text-align:center}',
-    'h2{font-size:14px;margin:2px 0}',
-    'hr{border:1px dashed #000;margin:4px 0}',
-    '.row{display:flex;justify-content:space-between;margin:2px 0}',
-    '.big{font-size:18px;font-weight:bold}',
-    '@media print{@page{margin:0;size:58mm auto}}',
-    '</style></head><body>',
-    '<h1>PIONEROS 4x4</h1><hr>',
-    '<h2>#' + trip.numero + ' ' + trip.nombre + '</h2>',
-    '<div>' + trip.piloto + (trip.copiloto ? ' / ' + trip.copiloto : '') + '</div><hr>',
-    '<div><b>Vuelta ' + vn + '</b> - ' + catNom + '</div>',
-    tramoHtml,
-    '<hr><div class="row"><span class="big">TOTAL:</span><span class="big">' + formatTiempo(vuelta.total_vuelta) + '</span></div><hr>',
-    '<div style="text-align:center;font-size:10px">' + now + '</div>',
-    '<script>window.print();window.close()<\/script>',
-    '</body></html>'
-  ].join('')
+  lines += '------------------------\n'
+  lines += 'TOTAL:  ' + formatTiempo(vuelta.total_vuelta) + '\n'
+  lines += '------------------------\n'
+  lines += new Date().toLocaleString() + '\n'
+  const doc = '<html><head><style>@media print{@page{margin:0;size:58mm auto}}pre{font-size:12px;margin:0;padding:4px}</style></head><body><pre>' + lines + '</pre><script>window.print();window.close()<\/script></body></html>'
   const w = window.open('', '_blank', 'width=300,height=400')
   if (w) { w.document.write(doc); w.document.close() }
 }
