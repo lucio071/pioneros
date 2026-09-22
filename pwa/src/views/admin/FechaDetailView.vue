@@ -336,10 +336,25 @@ async function fetchCronoEstado() {
       if (selectedTripB.value) {
         selectedTripB.value = tripulaciones.value.find((t: any) => t.id === selectedTripB.value?.id) || selectedTripB.value
       }
-      // Si cambiaron los datos, actualizar formularios (solo si el usuario no editó)
-      const formVacio = !tramoA.value.tiempo_min && !tramoA.value.tiempo_sec && !tramoB.value.tiempo_min && !tramoB.value.tiempo_sec
-      if (formVacio) {
-        resetTramoForms()
+      // Actualizar formularios vacíos con datos del sensor
+      const formAVacio = !tramoA.value.tiempo_min && !tramoA.value.tiempo_sec
+      const formBVacio = !tramoB.value.tiempo_min && !tramoB.value.tiempo_sec
+      if (formAVacio || formBVacio) {
+        if (selectedTripB.value) {
+          const tripEnA = corridaActual.value === 1 ? selectedTrip.value : selectedTripB.value
+          const tripEnB = corridaActual.value === 1 ? selectedTripB.value : selectedTrip.value
+          if (formAVacio) {
+            const trA = buscarTramo(tripEnA, 'A')
+            if (trA) cargarTramoEnForm(tramoA, trA)
+          }
+          if (formBVacio) {
+            const trB = buscarTramo(tripEnB, 'B')
+            if (trB) cargarTramoEnForm(tramoB, trB)
+          }
+        } else if (formAVacio) {
+          const trA = buscarTramo(selectedTrip.value, 'A')
+          if (trA) cargarTramoEnForm(tramoA, trA)
+        }
       }
     } catch {}
   }
