@@ -137,8 +137,14 @@ function restaurarParActivo() {
       selectedTripB.value = tripulaciones.value.find((t: any) => t.id === data.tripBId) || null
     }
     selectedVuelta.value = data.vuelta || 1
-    corridaActual.value = data.corrida || 1
-    corrida1Guardada.value = data.corrida1Guardada || false
+    corridaActual.value = 1
+    // Verificar si corrida 1 realmente tiene datos
+    const restoredTrip = tripulaciones.value.find((t: any) => t.id === data.tripAId)
+    const tieneTramoA = restoredTrip?.vueltas?.some((v: any) => v.tramos?.some((tr: any) => tr.letra === 'A' && tr.tiempo_ms > 0))
+    corrida1Guardada.value = !!tieneTramoA
+    if (corrida1Guardada.value && data.corrida === 2) {
+      corridaActual.value = 2
+    }
     startCronoPolling()
     resetTramoForms()
   } catch { limpiarParActivo() }
