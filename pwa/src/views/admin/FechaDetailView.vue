@@ -603,6 +603,30 @@ function selectTrip(t: any) {
   resetTramoForms()
 }
 
+function vueltaCompleta(n: number): boolean {
+  if (!selectedTrip.value) return false
+  const trip = selectedTrip.value
+  const fase = n === 99 ? 'final' : 'clasificacion'
+  const vuelta = (trip.vueltas || []).find((v: any) => v.numero_vuelta === n && v.fase === fase)
+  if (!vuelta?.tramos) return false
+  if (selectedTripB.value) {
+    // Pista doble: necesita tramo A y B (entre las 2 trips)
+    const tripB = selectedTripB.value
+    const vueltaB = (tripB.vueltas || []).find((v: any) => v.numero_vuelta === n && v.fase === fase)
+    const tieneA = vuelta.tramos.some((tr: any) => tr.letra === 'A' && tr.tiempo_ms > 0)
+    const tieneB = vueltaB?.tramos?.some((tr: any) => tr.letra === 'B' && tr.tiempo_ms > 0)
+    const tripATieneB = vuelta.tramos.some((tr: any) => tr.letra === 'B' && tr.tiempo_ms > 0)
+    const tripBTieneA = vueltaB?.tramos?.some((tr: any) => tr.letra === 'A' && tr.tiempo_ms > 0)
+    return !!(tieneA && tieneB && tripATieneB && tripBTieneA)
+  }
+  return vuelta.tramos.some((tr: any) => tr.letra === 'A' && tr.tiempo_ms > 0)
+}
+
+function vueltaHabilitada(n: number): boolean {
+  if (n === 1) return true
+  return vueltaCompleta(n - 1)
+}
+
 function cargarTramoEnForm(form: any, tr: any) {
   const ms = tr.tiempo_ms || 0
   const totalSec = Math.floor(ms / 1000)
@@ -1222,10 +1246,12 @@ if (typeof window !== 'undefined') {
 
             <!-- Vuelta selector -->
             <div class="flex gap-1.5 overflow-x-auto">
-              <button v-for="n in (fecha?.vueltas_clasificacion || 0)" :key="n" @click="selectedVuelta = n; corridaActual = 1; resetTramoForms()"
+              <button v-for="n in (fecha?.vueltas_clasificacion || 0)" :key="n"
+                @click="vueltaHabilitada(n) ? (selectedVuelta = n, corridaActual = 1, resetTramoForms()) : undefined"
+                :disabled="!vueltaHabilitada(n)"
                 :class="['px-3 py-1.5 rounded-lg text-sm font-medium',
-                  selectedVuelta === n ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600']">
-                V{{ n }}
+                  selectedVuelta === n ? 'bg-blue-600 text-white' : !vueltaHabilitada(n) ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-gray-100 text-gray-600']">
+                V{{ n }} {{ vueltaCompleta(n) ? '&#x2713;' : '' }}
               </button>
               <button v-if="selectedCat?.fase === 'final'" @click="selectedVuelta = 99; corridaActual = 1; resetTramoForms()"
                 :class="['px-3 py-1.5 rounded-lg text-sm font-medium',
