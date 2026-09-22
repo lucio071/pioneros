@@ -3,6 +3,8 @@
  * Placa: SparkleIoT ESP32-S3 XH-S3E
  * Panel: HUB75 80x20 (DMA 160x10)
  * DUAL-CORE: Core 1=display 20fps, Core 0=HTTP
+ * Comandos por long polling: GET comandos-pendientes?wait=10 (el servidor
+ * responde al instante cuando hay comando). El heartbeat va en el mismo GET.
  *
  * ARDUINO IDE:
  *   Placa: ESP32S3 Dev Module
@@ -26,9 +28,10 @@
 
 // ================== CONSTANTES ==================
 #define API_URL    "http://192.168.100.5"
-#define HTTP_TIMEOUT_MS        2000
-#define POLL_INTERVAL_MS       500
-#define HEARTBEAT_INTERVAL_MS  5000
+#define LONG_POLL_WAIT_S       10     // el servidor retiene el GET hasta 10 s
+#define HTTP_TIMEOUT_MS        (LONG_POLL_WAIT_S * 1000 + 3000)
+#define POLL_RETRY_MS          500    // espera entre polls solo si hubo error
+#define STATUS_INTERVAL_MS     5000
 
 // ================== DISPLAY ==================
 #define LOGIC_W  80
@@ -71,6 +74,10 @@ bool wifi_connected = false;
 
 // Mutex para proteger strings compartidos
 SemaphoreHandle_t mutex_estado = NULL;
+
+// OTA
+TaskHandle_t http_task = NULL;
+volatile bool ota_en_curso = false;
 
 // ================== MAPPING PANEL ==================
 void drawLogicPixel(int x, int y, uint16_t color) {
@@ -192,25 +199,6 @@ void cmdSetTripulacion(String numero, int v) {
 }
 
 // ================== HTTP (Core 0 — tarea separada) ==================
-void enviarHeartbeat() {
-  if (!wifi_connected) return;
-  HTTPClient http;
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.begin(String(API_URL) + "/api/v1/cronometro/heartbeat");
-  http.addHeader("Authorization", String("Bearer ") + API_TOKEN);
-  http.addHeader("Content-Type", "application/json");
-  StaticJsonDocument<128> doc;
-  doc["rssi"] = WiFi.RSSI();
-  doc["voltaje_mv"] = 5000;
-  doc["uptime_sec"] = millis() / 1000;
-  String body;
-  serializeJson(doc, body);
-  int code = http.POST(body);
-  http.end();
-  if (code >= 200 && code < 300) http_ok++;
-  else http_err++;
-}
-
 void confirmarComando(const char* cmd_id) {
   if (!wifi_connected) return;
   HTTPClient http;
@@ -221,11 +209,18 @@ void confirmarComando(const char* cmd_id) {
   http.end();
 }
 
-void consultarComandos() {
-  if (!wifi_connected) return;
+// Long poll: bloquea hasta LONG_POLL_WAIT_S o hasta que haya comando.
+// Devuelve true si el servidor respondio bien.
+bool consultarComandos() {
+  if (!wifi_connected) return false;
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
-  http.begin(String(API_URL) + "/api/v1/cronometro/comandos-pendientes");
+  String url = String(API_URL) + "/api/v1/cronometro/comandos-pendientes"
+             + "?wait=" + LONG_POLL_WAIT_S
+             + "&rssi=" + (int) WiFi.RSSI()
+             + "&voltaje_mv=5000"
+             + "&uptime_sec=" + (millis() / 1000);
+  http.begin(url);
   http.addHeader("Authorization", String("Bearer ") + API_TOKEN);
   int code = http.GET();
 
@@ -263,25 +258,23 @@ void consultarComandos() {
     http_err++;
   }
   http.end();
+  return code == 200;
 }
 
 // ================== TAREA HTTP (Core 0) ==================
 void tareaHTTP(void* param) {
-  uint32_t last_poll = 0;
-  uint32_t last_hb = 0;
+  uint32_t last_status = 0;
 
   for (;;) {
     wifi_connected = (WiFi.status() == WL_CONNECTED);
 
     if (wifi_connected) {
-      if (millis() - last_poll > POLL_INTERVAL_MS) {
-        consultarComandos();
-        last_poll = millis();
-      }
+      // El GET se queda esperando en el servidor; al volver, se repite enseguida
+      bool ok = consultarComandos();
+      if (!ok) vTaskDelay(pdMS_TO_TICKS(POLL_RETRY_MS));
 
-      if (millis() - last_hb > HEARTBEAT_INTERVAL_MS) {
-        enviarHeartbeat();
-        last_hb = millis();
+      if (millis() - last_status > STATUS_INTERVAL_MS) {
+        last_status = millis();
         Serial.printf("[STATUS] WiFi=OK HTTP OK=%u ER=%u | Estado=%d\n", http_ok, http_err, estado);
       }
     } else {
@@ -293,7 +286,7 @@ void tareaHTTP(void* param) {
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
 
@@ -340,10 +333,23 @@ void setup() {
   ArduinoOTA.setPassword(OTA_PASS);
   ArduinoOTA.onStart([]() {
     Serial.println("OTA iniciando...");
+    ota_en_curso = true;
+    esp_task_wdt_delete(NULL);                 // handle() bloquea el loop: sacarlo del WDT
+    if (http_task) vTaskSuspend(http_task);    // sin polls HTTP compitiendo por WiFi
     display->clearScreen();
+    display->stopDMAoutput();                  // panel apagado: menos consumo y sin DMA
   });
-  ArduinoOTA.onEnd([]() { Serial.println("OTA completo"); });
-  ArduinoOTA.onError([](ota_error_t error) { Serial.printf("OTA Error %u\n", error); });
+  ArduinoOTA.onProgress([](unsigned int prog, unsigned int total) {
+    static uint8_t last_pct = 255;
+    uint8_t pct = (prog * 100) / total;
+    if (pct != last_pct && pct % 10 == 0) { Serial.printf("OTA %u%%\n", pct); last_pct = pct; }
+  });
+  ArduinoOTA.onEnd([]() { Serial.println("OTA completo, reiniciando"); });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("OTA Error %u, reiniciando\n", error);
+    delay(500);
+    ESP.restart();                             // vuelve al firmware actual limpio
+  });
   ArduinoOTA.begin();
   Serial.printf("OTA listo (hostname: %s)\n", OTA_HOST);
 
@@ -363,7 +369,7 @@ void setup() {
     8192,         // stack bytes
     NULL,         // parametro
     1,            // prioridad
-    NULL,         // handle
+    &http_task,   // handle (para suspender durante OTA)
     0             // Core 0
   );
 
@@ -373,6 +379,7 @@ void setup() {
 // ================== LOOP (Core 1 — solo display) ==================
 void loop() {
   ArduinoOTA.handle();
+  if (ota_en_curso) { delay(10); return; }   // no dibujar mientras sube
   renderDisplay();
   esp_task_wdt_reset();
   delay(50);  // ~20 fps
