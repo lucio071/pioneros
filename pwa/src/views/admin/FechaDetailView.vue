@@ -465,9 +465,16 @@ function imprimirTiempo(trip: any, vuelta: any) {
   lines += 'TOTAL:  ' + formatTiempo(vuelta.total_vuelta) + '\n'
   lines += '------------------------\n'
   lines += new Date().toLocaleString() + '\n'
-  const doc = '<html><head><style>@media print{@page{margin:0;size:58mm auto}}pre{font-size:12px;margin:0;padding:4px}</style></head><body><pre>' + lines + '</pre><script>window.print();window.close()<\/script></body></html>'
-  const w = window.open('', '_blank', 'width=300,height=400')
-  if (w) { w.document.write(doc); w.document.close() }
+  const doc = '<html><head><style>@media print{@page{margin:0;size:58mm auto}}pre{font-size:12px;margin:0;padding:4px}</style></head><body><pre>' + lines + '</pre><script>window.print()<\/script></body></html>'
+  let iframe = document.getElementById('print-frame') as HTMLIFrameElement
+  if (!iframe) {
+    iframe = document.createElement('iframe')
+    iframe.id = 'print-frame'
+    iframe.style.display = 'none'
+    document.body.appendChild(iframe)
+  }
+  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
+  if (iframeDoc) { iframeDoc.open(); iframeDoc.write(doc); iframeDoc.close() }
 }
 
 async function load() {
