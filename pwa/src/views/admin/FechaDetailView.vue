@@ -1410,9 +1410,13 @@ if (typeof window !== 'undefined') {
             </div>
 
             <!-- Guardar corrida (pista doble) -->
-            <button v-if="selectedTripB" @click="guardarCorrida"
+            <button v-if="selectedTripB && !vueltaCompleta(selectedVuelta)" @click="guardarCorrida"
               class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg text-lg transition-colors">
               Guardar Corrida {{ corridaActual }} — V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }}
+            </button>
+            <div v-else-if="selectedTripB && vueltaCompleta(selectedVuelta)"
+              class="w-full bg-gray-100 text-gray-500 font-bold py-3 rounded-lg text-lg text-center">
+              V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }} completa &#x2713;
             </button>
 
             <!-- Abandonar trip (pista doble) -->
