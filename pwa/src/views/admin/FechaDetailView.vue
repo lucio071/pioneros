@@ -61,6 +61,7 @@ function asignarPista(t: any) {
 
 const corridaActual = ref<1 | 2>(1)
 const corrida1Guardada = ref(false)
+const largadaEnCurso = ref(false)
 
 // Quien corre en cada pista segun la corrida
 const tripEnPistaA = computed(() => {
@@ -251,6 +252,7 @@ async function guardarCorrida() {
     }
 
     if (navigator.vibrate) navigator.vibrate([50, 50, 50])
+    largadaEnCurso.value = false
     showToast(`Corrida ${corridaActual.value} guardada`)
     resetTramoForms()
     await load()
@@ -407,6 +409,7 @@ async function armarLargada() {
         tramo_letra: 'A',
       })
     }
+    largadaEnCurso.value = true
     if (navigator.vibrate) navigator.vibrate([100, 50, 100])
     showToast('Largada armada: sensores + semaforo')
   } catch (e: any) {
@@ -1279,15 +1282,16 @@ if (typeof window !== 'undefined') {
                 </div>
               </div>
               <div class="grid grid-cols-3 gap-2">
-                <button @click="armarLargada"
-                  class="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-2.5 rounded-lg transition-colors">
+                <button @click="armarLargada" :disabled="largadaEnCurso"
+                  :class="['text-white text-xs font-bold py-2.5 rounded-lg transition-colors',
+                    largadaEnCurso ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700']">
                   ARMAR LARGADA
                 </button>
                 <button @click="armarLlegada"
                   class="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-2.5 rounded-lg transition-colors">
                   ARMAR LLEGADA
                 </button>
-                <button @click="enviarComandoCrono('reset')"
+                <button @click="enviarComandoCrono('reset'); largadaEnCurso = false"
                   class="bg-gray-200 hover:bg-gray-300 text-gray-600 text-xs font-bold py-2.5 rounded-lg transition-colors">
                   RESET
                 </button>
