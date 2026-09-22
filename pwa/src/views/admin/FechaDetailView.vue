@@ -1100,10 +1100,11 @@ if (typeof window !== 'undefined') {
             <template v-if="selectedTripB">
               <!-- Indicador de corrida -->
               <div class="flex items-center justify-center gap-2">
-                <button @click="corridaActual = 1; resetTramoForms()"
+                <button
+                  :disabled="corrida1Guardada"
                   :class="['px-4 py-1.5 rounded-lg text-sm font-bold transition-colors',
-                    corridaActual === 1 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500']">
-                  Corrida 1
+                    corridaActual === 1 ? 'bg-blue-600 text-white' : corrida1Guardada ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-gray-100 text-gray-500']">
+                  Corrida 1 {{ corrida1Guardada ? '&#x2713;' : '' }}
                 </button>
                 <button @click="corrida1Guardada ? cambiarACorrida2() : undefined"
                   :disabled="!corrida1Guardada"
