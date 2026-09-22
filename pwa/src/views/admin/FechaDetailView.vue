@@ -654,11 +654,8 @@ async function abandonarTrip(trip: any) {
       await apiMutate('POST', `/vueltas/${vuelta.id}/nula`)
     }
 
-    // Marcar como abandonado
-    await apiMutate('PUT', `/tripulaciones/${trip.id}`, { estado: 'abandonado' })
-
     if (navigator.vibrate) navigator.vibrate([100, 50, 100])
-    showToast(`#${trip.numero} abandonó — vuelta nula`)
+    showToast(`#${trip.numero} abandonó — vuelta V${selectedVuelta.value} nula`)
     await load()
     selectedTrip.value = tripulaciones.value.find((t: any) => t.id === selectedTrip.value?.id) || selectedTrip.value
     if (selectedTripB.value) {
