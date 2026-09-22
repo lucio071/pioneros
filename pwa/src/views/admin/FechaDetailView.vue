@@ -219,18 +219,21 @@ async function guardarCorrida() {
   const tripA = selectedTrip.value   // trip original pista A
   const tripB = selectedTripB.value  // trip original pista B
 
-  const bodyPistaA = {
-    tiempo_ms: tramoToMs(tramoA.value),
+  const msA = tramoToMs(tramoA.value)
+  const msB = tramoToMs(tramoB.value)
+  const bodyPistaA: any = {
     estacas: tramoA.value.estacas,
     cintas: tramoA.value.cintas,
     tiempos_muertos: tramoA.value.tiempos_muertos,
   }
-  const bodyPistaB = tripB ? {
-    tiempo_ms: tramoToMs(tramoB.value),
+  if (msA > 0) bodyPistaA.tiempo_ms = msA
+
+  const bodyPistaB: any = tripB ? {
     estacas: tramoB.value.estacas,
     cintas: tramoB.value.cintas,
     tiempos_muertos: tramoB.value.tiempos_muertos,
   } : null
+  if (bodyPistaB && msB > 0) bodyPistaB.tiempo_ms = msB
 
   try {
     if (corridaActual.value === 1) {
