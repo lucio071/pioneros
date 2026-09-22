@@ -465,16 +465,26 @@ function imprimirTiempo(trip: any, vuelta: any) {
   lines += 'TOTAL:  ' + formatTiempo(vuelta.total_vuelta) + '\n'
   lines += '------------------------\n'
   lines += new Date().toLocaleString() + '\n'
-  const doc = '<html><head><style>@media print{@page{margin:0;size:58mm auto}}pre{font-size:12px;margin:0;padding:4px}</style></head><body><pre>' + lines + '</pre><script>window.print()<\/script></body></html>'
-  let iframe = document.getElementById('print-frame') as HTMLIFrameElement
-  if (!iframe) {
-    iframe = document.createElement('iframe')
-    iframe.id = 'print-frame'
-    iframe.style.display = 'none'
-    document.body.appendChild(iframe)
+  const doc = '<html><head><style>@media print{@page{margin:0;size:58mm auto}}pre{font-size:12px;margin:0;padding:4px}</style></head><body><pre>' + lines + '</pre></body></html>'
+  const w = window.open('', '_blank')
+  if (w) {
+    w.document.write(doc)
+    w.document.close()
+    w.focus()
+    setTimeout(() => { w.print() }, 500)
+  } else {
+    // Fallback: imprimir la pagina actual
+    const printDiv = document.createElement('div')
+    printDiv.innerHTML = '<pre style="font-size:12px">' + lines + '</pre>'
+    printDiv.id = 'print-div'
+    document.body.appendChild(printDiv)
+    const style = document.createElement('style')
+    style.textContent = '@media print { body > *:not(#print-div) { display:none !important } #print-div { display:block !important } @page { margin:0; size:58mm auto } }'
+    document.head.appendChild(style)
+    window.print()
+    document.body.removeChild(printDiv)
+    document.head.removeChild(style)
   }
-  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
-  if (iframeDoc) { iframeDoc.open(); iframeDoc.write(doc); iframeDoc.close() }
 }
 
 async function load() {
