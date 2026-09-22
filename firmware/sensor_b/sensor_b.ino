@@ -1,6 +1,7 @@
 /*
  * PIONEROS 4x4 - SENSOR-B LoRa
  * Placa: LILYGO T3 V1.6.1
+ * Sensor: M18 laser PNP dark-on (12V) via opto PC817 HY-M154 -> GPIO34, interrupcion RISING
  *
  * Comandos serie (115200):
  *   c = simular cruce
@@ -26,6 +27,9 @@
 #define LORA_RST   23
 #define LORA_DIO0  26
 #define LED_PIN    25
+
+#define SENSOR_PIN     34      // salida opto (emisor) + 10k a GND, solo entrada
+#define DEBOUNCE_MS    2000   // ignora cortes repetidos del mismo vehiculo
 
 #define MAGIC         0xA5
 #define VERSION       0x01
@@ -55,6 +59,17 @@ int last_rssi = 0;
 
 bool habilitado = false;
 uint32_t habilitado_hasta = 0;
+
+volatile bool cruce_pendiente = false;
+volatile uint32_t ultimo_cruce_isr_ms = 0;
+uint32_t ignorados_count = 0;
+
+void IRAM_ATTR sensorISR() {
+  uint32_t ahora = millis();
+  if (ahora - ultimo_cruce_isr_ms < DEBOUNCE_MS) return;
+  ultimo_cruce_isr_ms = ahora;
+  cruce_pendiente = true;
+}
 
 uint16_t crc16(uint8_t* data, size_t len) {
   uint16_t crc = 0xFFFF;
@@ -200,8 +215,9 @@ void procesarComandoSerial() {
         updateDisplay();
         break;
       case 's': case 'S':
-        Serial.printf(">>> Estado: %s | Cruces: %d | ACK: %d | RSSI: %d | Up: %ds\n",
-                      habilitado ? "ON" : "OFF", cruces_count, ack_count, last_rssi, millis()/1000);
+        Serial.printf(">>> Estado: %s | Cruces: %d | Ignorados: %d | ACK: %d | RSSI: %d | Sensor: %d | Up: %ds\n",
+                      habilitado ? "ON" : "OFF", cruces_count, ignorados_count, ack_count, last_rssi,
+                      digitalRead(SENSOR_PIN), millis()/1000);
         break;
       case '\n': case '\r': break;
       default:
@@ -213,6 +229,7 @@ void procesarComandoSerial() {
 void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
+  pinMode(SENSOR_PIN, INPUT);   // GPIO34 no tiene pull-down interno; el 10k externo a GND lo fija en LOW
   delay(1000);
   Wire.begin(21, 22);
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -243,6 +260,25 @@ void setup() {
   Serial.println("=====================================");
   delay(2000);
   updateDisplay();
+  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), sensorISR, RISING);
+  Serial.printf("Sensor M18 en GPIO%d (RISING, debounce %dms)\n", SENSOR_PIN, DEBOUNCE_MS);
+}
+
+void procesarCruceSensor() {
+  if (!cruce_pendiente) return;
+  noInterrupts();
+  cruce_pendiente = false;
+  interrupts();
+  if (habilitado) {
+    digitalWrite(LED_PIN, HIGH);
+    enviarCruce();
+    Serial.println(">>> CRUCE SENSOR");
+    updateDisplay();
+    digitalWrite(LED_PIN, LOW);
+  } else {
+    ignorados_count++;
+    Serial.println("Cruce sensor ignorado (NO habilitado)");
+  }
 }
 
 void loop() {
@@ -256,6 +292,7 @@ void loop() {
     LoRa.receive();
     updateDisplay();
   }
+  procesarCruceSensor();
   if (habilitado && millis() > habilitado_hasta) {
     habilitado = false;
     Serial.println("Habilitacion expirada");
