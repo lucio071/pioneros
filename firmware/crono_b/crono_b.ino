@@ -279,8 +279,8 @@ void tareaHTTP(void* param) {
 
       // Watchdog de red: sin 200 en 60s → reconectar WiFi
       uint32_t sin_respuesta = millis() - last_ok_ms;
-      if (sin_respuesta > 60000) {
-        Serial.println("[WATCHDOG] 60s sin respuesta, reconectando WiFi...");
+      if (sin_respuesta > 30000) {
+        Serial.println("[WATCHDOG] 30s sin respuesta, reconectando WiFi...");
         WiFi.disconnect();
         vTaskDelay(pdMS_TO_TICKS(1000));
         WiFi.reconnect();
