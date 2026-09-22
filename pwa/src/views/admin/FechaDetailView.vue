@@ -638,6 +638,37 @@ function cargarTramoEnForm(form: any, tr: any) {
   form.value.tiempos_muertos = (tr.tiempos_muertos || []).map((tm: any) => tm.segundos || tm)
 }
 
+async function abandonarTrip(trip: any) {
+  if (!trip) return
+  if (!confirm(`ABANDONAR #${trip.numero} en esta vuelta?\n\nSu vuelta V${selectedVuelta.value} quedará NULA.\nLa otra tripulación sigue corriendo.`)) return
+
+  try {
+    // Crear tramo vacío para que exista la vuelta, luego marcar nula
+    const path = `/tripulaciones/${trip.id}/vueltas/${selectedVuelta.value}/tramos/A`
+    await apiMutate('PUT', path, { tiempo_ms: 0, estacas: 0, cintas: 0 })
+
+    // Buscar la vuelta y marcar nula
+    const tripData = await apiFetch<any>(`/public/fechas/${fecha.value.id}/tripulaciones/${trip.id}`)
+    const vuelta = (tripData.data?.vueltas || []).find((v: any) => v.numero_vuelta === selectedVuelta.value)
+    if (vuelta) {
+      await apiMutate('POST', `/vueltas/${vuelta.id}/nula`)
+    }
+
+    // Marcar como abandonado
+    await apiMutate('PUT', `/tripulaciones/${trip.id}`, { estado: 'abandonado' })
+
+    if (navigator.vibrate) navigator.vibrate([100, 50, 100])
+    showToast(`#${trip.numero} abandonó — vuelta nula`)
+    await load()
+    selectedTrip.value = tripulaciones.value.find((t: any) => t.id === selectedTrip.value?.id) || selectedTrip.value
+    if (selectedTripB.value) {
+      selectedTripB.value = tripulaciones.value.find((t: any) => t.id === selectedTripB.value?.id) || selectedTripB.value
+    }
+  } catch (e: any) {
+    showToast(e.message || 'Error', 'error')
+  }
+}
+
 function buscarTramo(trip: any, letra: string) {
   if (!trip) return null
   const fase = selectedVuelta.value === 99 ? 'final' : 'clasificacion'
@@ -1376,8 +1407,20 @@ if (typeof window !== 'undefined') {
               Guardar Corrida {{ corridaActual }} — V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }}
             </button>
 
-            <!-- Anular vuelta -->
-            <button @click="anularVuelta"
+            <!-- Abandonar trip (pista doble) -->
+            <div v-if="selectedTripB" class="grid grid-cols-2 gap-2">
+              <button @click="abandonarTrip(tripEnPistaA)"
+                class="bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2 rounded-lg text-xs transition-colors">
+                Abandono #{{ tripEnPistaA?.numero }}
+              </button>
+              <button @click="abandonarTrip(tripEnPistaB)"
+                class="bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2 rounded-lg text-xs transition-colors">
+                Abandono #{{ tripEnPistaB?.numero }}
+              </button>
+            </div>
+
+            <!-- Anular vuelta (pista simple) -->
+            <button v-else @click="anularVuelta"
               class="w-full bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2.5 rounded-lg transition-colors">
               Anular vuelta
             </button>
