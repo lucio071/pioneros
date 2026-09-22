@@ -1417,7 +1417,7 @@ if (typeof window !== 'undefined') {
             <div v-else-if="selectedTripB && vueltaCompleta(selectedVuelta)"
               class="w-full bg-gray-100 text-gray-500 font-bold py-3 rounded-lg text-lg text-center">
               V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }} completa &#x2713;
-            </button>
+            </div>
 
             <!-- Abandonar trip (pista doble) -->
             <div v-if="selectedTripB" class="grid grid-cols-2 gap-2">
