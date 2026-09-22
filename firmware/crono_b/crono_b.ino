@@ -264,18 +264,37 @@ bool consultarComandos() {
 // ================== TAREA HTTP (Core 0) ==================
 void tareaHTTP(void* param) {
   uint32_t last_status = 0;
+  uint32_t last_ok_ms = millis();  // ultimo HTTP 200 exitoso
 
   for (;;) {
     wifi_connected = (WiFi.status() == WL_CONNECTED);
 
     if (wifi_connected) {
-      // El GET se queda esperando en el servidor; al volver, se repite enseguida
       bool ok = consultarComandos();
-      if (!ok) vTaskDelay(pdMS_TO_TICKS(POLL_RETRY_MS));
+      if (ok) {
+        last_ok_ms = millis();
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(POLL_RETRY_MS));
+      }
+
+      // Watchdog de red: sin 200 en 60s → reconectar WiFi
+      uint32_t sin_respuesta = millis() - last_ok_ms;
+      if (sin_respuesta > 60000) {
+        Serial.println("[WATCHDOG] 60s sin respuesta, reconectando WiFi...");
+        WiFi.disconnect();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        WiFi.reconnect();
+        last_ok_ms = millis(); // reset para dar tiempo
+      }
+      // Sin 200 en 3 min → reiniciar ESP
+      if (sin_respuesta > 180000) {
+        Serial.println("[WATCHDOG] 3 min sin respuesta, reiniciando...");
+        ESP.restart();
+      }
 
       if (millis() - last_status > STATUS_INTERVAL_MS) {
         last_status = millis();
-        Serial.printf("[STATUS] WiFi=OK HTTP OK=%u ER=%u | Estado=%d\n", http_ok, http_err, estado);
+        Serial.printf("[STATUS] WiFi=OK HTTP OK=%u ER=%u | Estado=%d | sinResp=%lus\n", http_ok, http_err, estado, sin_respuesta/1000);
       }
     } else {
       static uint32_t last_reconnect = 0;
@@ -283,6 +302,11 @@ void tareaHTTP(void* param) {
         Serial.println("[WiFi] reconectando...");
         WiFi.reconnect();
         last_reconnect = millis();
+      }
+      // Si lleva mucho sin WiFi, reiniciar
+      if (millis() - last_ok_ms > 180000) {
+        Serial.println("[WATCHDOG] 3 min sin WiFi, reiniciando...");
+        ESP.restart();
       }
     }
 
