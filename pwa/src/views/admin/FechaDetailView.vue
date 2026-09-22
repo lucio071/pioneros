@@ -1205,7 +1205,11 @@ if (typeof window !== 'undefined') {
                 <div v-for="trip in [selectedTrip, selectedTripB]" :key="trip.id" class="bg-gray-50 rounded-lg p-2 space-y-1">
                   <p class="text-[10px] text-gray-400 font-medium">#{{ trip.numero }} - Tiempos</p>
                   <div v-for="v in trip.vueltas" :key="v.id" class="text-xs">
-                    <span class="font-mono text-gray-700">V{{ v.numero_vuelta }}: {{ v.nula ? 'NULA' : formatTiempo(v.total_vuelta) }}</span>
+                    <div class="flex items-center justify-between">
+                      <span class="font-mono text-gray-700">V{{ v.numero_vuelta }}: {{ v.nula ? 'NULA' : formatTiempo(v.total_vuelta) }}</span>
+                      <button v-if="!v.nula && v.tramos?.length >= 2" @click="imprimirTiempo(trip, v)"
+                        class="text-[9px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">Print</button>
+                    </div>
                     <div v-for="tr in v.tramos" :key="tr.id" class="text-[10px] text-gray-400 ml-2">
                       {{ tr.letra }}: {{ formatTiempo(tr.tiempo_ms) }}
                       <span v-if="tr.estacas || tr.cintas" class="text-orange-500">{{ tr.estacas }}E {{ tr.cintas }}C</span>
