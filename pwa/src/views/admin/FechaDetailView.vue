@@ -1312,7 +1312,7 @@ if (typeof window !== 'undefined') {
             <!-- Vuelta selector -->
             <div class="flex gap-1.5 overflow-x-auto">
               <button v-for="n in (fecha?.vueltas_clasificacion || 0)" :key="n"
-                @click="vueltaHabilitada(n) ? (selectedVuelta = n, corridaActual = 1, resetTramoForms()) : undefined"
+                @click="vueltaHabilitada(n) ? (selectedVuelta = n, corridaActual = 1, corrida1Guardada = false, largadaEnCurso = false, resetTramoForms()) : undefined"
                 :disabled="!vueltaHabilitada(n)"
                 :class="['px-3 py-1.5 rounded-lg text-sm font-medium',
                   selectedVuelta === n ? 'bg-blue-600 text-white' : !vueltaHabilitada(n) ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-gray-100 text-gray-600']">
