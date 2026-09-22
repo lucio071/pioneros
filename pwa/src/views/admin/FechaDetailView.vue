@@ -678,6 +678,11 @@ async function abandonarTrip(trip: any) {
       await apiMutate('POST', `/vueltas/${vuelta.id}/nula`)
     }
 
+    // Reset crono de la pista donde corría el que abandonó
+    const esTripA = trip.id === tripEnPistaA.value?.id
+    const cronoCodigo = esTripA ? 'crono-a' : 'crono-b'
+    await apiMutate('POST', `/cronometro/${cronoCodigo}/comando`, { tipo: 'reset' }).catch(() => {})
+
     if (navigator.vibrate) navigator.vibrate([100, 50, 100])
     showToast(`#${trip.numero} abandonó — vuelta V${selectedVuelta.value} nula`)
     await load()
