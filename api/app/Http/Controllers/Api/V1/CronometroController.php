@@ -451,12 +451,25 @@ class CronometroController extends Controller
     {
         $sensor = DispositivoCronometro::where('codigo', $sensorCodigo)->first();
         if ($sensor) {
+            $duracion = 35;
             ComandoCronometro::create([
                 'dispositivo_id' => $sensor->id,
                 'tipo' => 'habilitar_sensor',
-                'payload' => ['duracion_seg' => 20],
+                'payload' => ['duracion_seg' => $duracion],
                 'creado_por_user_id' => $userId,
             ]);
+
+            // Notificar al crono de esa pista que el sensor esta armado
+            $cronoCodigo = $sensorCodigo === 'sensor-a' ? 'crono-a' : 'crono-b';
+            $crono = DispositivoCronometro::where('codigo', $cronoCodigo)->first();
+            if ($crono) {
+                ComandoCronometro::create([
+                    'dispositivo_id' => $crono->id,
+                    'tipo' => 'sensor_armado',
+                    'payload' => ['segundos' => $duracion],
+                    'creado_por_user_id' => $userId,
+                ]);
+            }
         }
     }
 
@@ -588,7 +601,7 @@ class CronometroController extends Controller
         }
 
         $data = $request->validate([
-            'tipo' => 'required|in:start,stop,reset,set_tiempo,set_tripulacion,habilitar_sensor,semaforo_largada',
+            'tipo' => 'required|in:start,stop,reset,set_tiempo,set_tripulacion,habilitar_sensor,semaforo_largada,sensor_armado',
             'payload' => 'nullable|array',
         ]);
 

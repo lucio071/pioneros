@@ -64,6 +64,8 @@ function asignarPista(t: any) {
 const corridaActual = ref<1 | 2>(1)
 const corrida1Guardada = ref(false)
 const largadaEnCurso = ref(false)
+const sensorArmadoHasta = ref(0)  // timestamp ms cuando expira
+const sensorCountdown = ref(0)    // segundos restantes
 
 // Quien corre en cada pista segun la corrida
 const tripEnPistaA = computed(() => {
@@ -428,6 +430,7 @@ async function armarLargada() {
       })
     }
     largadaEnCurso.value = true
+    sensorArmadoHasta.value = Date.now() + 35000
     if (navigator.vibrate) navigator.vibrate([100, 50, 100])
     showToast('Largada armada: sensores + semaforo')
   } catch (e: any) {
@@ -443,6 +446,7 @@ async function armarLlegada() {
       await apiMutate('POST', '/cronometro/armar-llegada')
     }
     if (navigator.vibrate) navigator.vibrate(50)
+    sensorArmadoHasta.value = Date.now() + 35000
     showToast('Llegada armada: sensores habilitados')
   } catch (e: any) {
     showToast(e.message || 'Error al armar llegada', 'error')
@@ -941,6 +945,15 @@ function autotab(event: Event, nextRef: string) {
   }
 }
 
+// Countdown del sensor armado
+setInterval(() => {
+  if (sensorArmadoHasta.value > Date.now()) {
+    sensorCountdown.value = Math.ceil((sensorArmadoHasta.value - Date.now()) / 1000)
+  } else {
+    sensorCountdown.value = 0
+  }
+}, 500)
+
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => offline.drain())
 }
@@ -1382,6 +1395,13 @@ if (typeof window !== 'undefined') {
                   selectedVuelta === 99 ? 'bg-orange-600 text-white' : 'bg-orange-100 text-orange-700']">
                 Final
               </button>
+            </div>
+
+            <!-- Sensor armado countdown -->
+            <div v-if="sensorCountdown > 0"
+              :class="['text-center py-1.5 rounded-lg text-sm font-bold animate-pulse',
+                sensorCountdown > 10 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-600']">
+              Sensor armado: {{ sensorCountdown }}s
             </div>
 
             <!-- ===== FORMULARIOS DE TIEMPO ===== -->

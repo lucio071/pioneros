@@ -52,7 +52,7 @@
 #define EV_ACK                 0xF0
 
 #define HEARTBEAT_INTERVAL_MS  5000
-#define HABILITADO_DURACION_MS 20000
+#define HABILITADO_DURACION_MS 35000
 
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 uint16_t seq_tx = 0;
@@ -130,16 +130,15 @@ void updateDisplay() {
   display.display();
 }
 
-void enviarLoRa(uint8_t dst_id, uint8_t tipo, uint8_t* extra, size_t extra_len) {
+void enviarLoRaRaw(uint8_t dst_id, uint8_t tipo, uint16_t seq, uint8_t* extra, size_t extra_len) {
   uint8_t packet[20];
   packet[0] = MAGIC;
   packet[1] = VERSION;
   packet[2] = SRC_ID;
   packet[3] = dst_id;
   packet[4] = tipo;
-  packet[5] = seq_tx & 0xFF;
-  packet[6] = (seq_tx >> 8) & 0xFF;
-  seq_tx++;
+  packet[5] = seq & 0xFF;
+  packet[6] = (seq >> 8) & 0xFF;
   size_t payload_size = 7;
   if (extra && extra_len > 0 && extra_len <= 10) {
     memcpy(&packet[7], extra, extra_len);
@@ -153,10 +152,14 @@ void enviarLoRa(uint8_t dst_id, uint8_t tipo, uint8_t* extra, size_t extra_len) 
   LoRa.write(packet, payload_size);
   LoRa.endPacket();
   LoRa.receive();
-  Serial.printf("TX tipo=0x%02X seq=%d\n", tipo, seq_tx - 1);
+  Serial.printf("TX tipo=0x%02X seq=%d\n", tipo, seq);
 }
 
-void enviarCruceConDelta(uint32_t t_cruce) {
+void enviarLoRa(uint8_t dst_id, uint8_t tipo, uint8_t* extra, size_t extra_len) {
+  enviarLoRaRaw(dst_id, tipo, seq_tx++, extra, extra_len);
+}
+
+void enviarCruceConSeq(uint16_t seq, uint32_t t_cruce) {
   uint32_t delta = millis() - t_cruce;
   uint8_t extra[5];
   extra[0] = (uint8_t)TRAMO;
@@ -164,14 +167,13 @@ void enviarCruceConDelta(uint32_t t_cruce) {
   extra[2] = (delta >> 8) & 0xFF;
   extra[3] = (delta >> 16) & 0xFF;
   extra[4] = (delta >> 24) & 0xFF;
-  // No incrementar seq_tx aqui — lo hace enviarLoRa
-  enviarLoRa(ID_GATEWAY, EV_CRUCE, extra, 5);
+  enviarLoRaRaw(ID_GATEWAY, EV_CRUCE, seq, extra, 5);
 }
 
 void iniciarCruce(uint32_t t_cruce) {
   cruce_timestamp = t_cruce;
-  cruce_seq = seq_tx;  // seq que usara enviarLoRa
-  enviarCruceConDelta(t_cruce);
+  cruce_seq = seq_tx++;  // reservar seq, todos los reintentos usan este mismo
+  enviarCruceConSeq(cruce_seq, t_cruce);
   cruces_count++;
   esperando_ack = true;
   reintentos = 1;
@@ -187,10 +189,10 @@ void reintentarCruce() {
     esperando_ack = false;
     return;
   }
-  enviarCruceConDelta(cruce_timestamp);
+  enviarCruceConSeq(cruce_seq, cruce_timestamp);  // mismo seq
   reintentos++;
   ultimo_reintento = millis();
-  Serial.printf("CRUCE reintento %d/%d\n", reintentos, CRUCE_MAX_RETRIES);
+  Serial.printf("CRUCE reintento %d/%d seq=%d\n", reintentos, CRUCE_MAX_RETRIES, cruce_seq);
 }
 
 void enviarHeartbeat() {

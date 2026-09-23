@@ -57,7 +57,7 @@ struct RxPacket {
   uint8_t len;
   int rssi;
 };
-volatile RxPacket rx_buf[RX_BUF_SIZE];
+RxPacket rx_buf[RX_BUF_SIZE];
 volatile uint8_t rx_head = 0;
 volatile uint8_t rx_tail = 0;
 volatile uint32_t rx_dropped = 0;
@@ -74,7 +74,7 @@ struct HttpEvent {
   uint32_t delta_ms;  // ms desde el cruce real (para corregir tiempo)
   uint32_t rx_at;     // millis() cuando se recibio
 };
-volatile HttpEvent http_q[HTTP_Q_SIZE];
+HttpEvent http_q[HTTP_Q_SIZE];
 volatile uint8_t hq_head = 0;
 volatile uint8_t hq_tail = 0;
 
@@ -87,7 +87,7 @@ struct TxCmd {
   uint8_t extra_len;
   uint8_t retries;  // cuantas veces enviar
 };
-volatile TxCmd tx_q[TX_Q_SIZE];
+TxCmd tx_q[TX_Q_SIZE];
 volatile uint8_t tq_head = 0;
 volatile uint8_t tq_tail = 0;
 
@@ -199,7 +199,7 @@ void onLoRaReceive(int packetSize) {
     return;
   }
 
-  RxPacket* p = (RxPacket*)&rx_buf[rx_head];
+  RxPacket* p = &rx_buf[rx_head];
   p->len = 0;
   while (LoRa.available() && p->len < 20) {
     p->data[p->len++] = LoRa.read();
@@ -237,16 +237,16 @@ void procesarPaquete(uint8_t* pkt, size_t len, int rssi) {
     // Enviar ACK inmediato
     enviarACK(src_id, seq);
 
-    // Extraer delta_ms del paquete (si viene, bytes 8-11 despues del tramo)
+    // Extraer delta_ms del paquete: header(7) + tramo(1) + delta(4) + crc(2) = 14
     uint32_t delta_ms = 0;
-    if (len >= 9 + 2 + 4) {  // header(7) + tramo(1) + delta(4) + crc(2)
+    if (len >= 14) {
       delta_ms = pkt[8] | (pkt[9] << 8) | (pkt[10] << 16) | (pkt[11] << 24);
     }
 
     // Encolar para HTTP
     uint8_t next = (hq_head + 1) % HTTP_Q_SIZE;
     if (next != hq_tail) {
-      HttpEvent* ev = (HttpEvent*)&http_q[hq_head];
+      HttpEvent* ev = &http_q[hq_head];
       ev->tipo = EV_CRUCE;
       ev->src_id = src_id;
       ev->tramo = (len >= 9 && pkt[7] != 0) ? pkt[7] : '?';
@@ -266,7 +266,7 @@ void procesarPaquete(uint8_t* pkt, size_t len, int rssi) {
     // Encolar para HTTP
     uint8_t next = (hq_head + 1) % HTTP_Q_SIZE;
     if (next != hq_tail) {
-      HttpEvent* ev = (HttpEvent*)&http_q[hq_head];
+      HttpEvent* ev = &http_q[hq_head];
       ev->tipo = EV_HEARTBEAT;
       ev->src_id = src_id;
       ev->rssi = hb_rssi;
@@ -343,39 +343,43 @@ void consultarComandos(const char* token, uint8_t dst_id) {
         if (!tipo || !cmd_id) continue;
 
         // Encolar TX LoRa
+        bool encolado = false;
         uint8_t next = (tq_head + 1) % TX_Q_SIZE;
         if (next != tq_tail) {
-          TxCmd* tc = (TxCmd*)&tx_q[tq_head];
+          TxCmd* tc = &tx_q[tq_head];
           tc->dst_id = dst_id;
           tc->extra_len = 0;
           tc->retries = 1;
 
           if (strcmp(tipo, "habilitar_sensor") == 0) {
             tc->tipo = CMD_HABILITAR_SENSOR;
-            uint16_t dur = 20;
+            uint16_t dur = cmd["payload"]["duracion_seg"] | 35;
             memcpy(tc->extra, &dur, 2);
             tc->extra_len = 2;
-            tc->retries = 3;  // enviar 3x como semaforo
+            tc->retries = 3;
           } else if (strcmp(tipo, "semaforo_largada") == 0) {
             tc->tipo = CMD_SEMAFORO_LARGADA;
             tc->retries = 3;
           } else if (strcmp(tipo, "reset") == 0) {
             tc->tipo = CMD_RESET;
           } else {
-            continue;  // tipo desconocido, no encolar
+            continue;  // tipo desconocido, no encolar ni confirmar
           }
           tq_head = next;
+          encolado = true;
         }
 
-        // Confirmar comando
-        HTTPClient http2;
-        http2.setTimeout(HTTP_TIMEOUT_MS);
-        http2.begin(String(API_URL) + "/api/v1/cronometro/comandos/" + cmd_id + "/confirmar");
-        http2.addHeader("Authorization", String("Bearer ") + token);
-        int rc = http2.POST("");
-        http2.end();
-        if (rc >= 200 && rc < 300) http_ok++;
-        else http_err++;
+        // Confirmar solo si se encolo
+        if (encolado) {
+          HTTPClient http2;
+          http2.setTimeout(HTTP_TIMEOUT_MS);
+          http2.begin(String(API_URL) + "/api/v1/cronometro/comandos/" + cmd_id + "/confirmar");
+          http2.addHeader("Authorization", String("Bearer ") + token);
+          int rc = http2.POST("");
+          http2.end();
+          if (rc >= 200 && rc < 300) http_ok++;
+          else http_err++;
+        }
       }
     }
   } else if (code > 0) {

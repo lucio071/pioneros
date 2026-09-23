@@ -56,6 +56,16 @@ uint32_t largadas_count = 0;
 uint32_t ack_count = 0;
 int last_rssi = 0;
 
+// Secuencia con maquina de estados (sin delay)
+// Tiempos configurables
+#define SEQ_R1_MS     3000
+#define SEQ_R2_MS     3000
+#define SEQ_R3_MS     3000
+#define SEQ_VERDE_MS  3000
+
+enum SeqFase { SEQ_IDLE, SEQ_R1, SEQ_R1R2, SEQ_R1R2R3, SEQ_VERDE };
+SeqFase seq_fase = SEQ_IDLE;
+uint32_t seq_inicio_fase = 0;
 bool secuencia_en_curso = false;
 
 uint16_t crc16(uint8_t* data, size_t len) {
@@ -142,49 +152,77 @@ void enviarHeartbeat() {
   enviarLoRa(ID_GATEWAY, EV_HEARTBEAT, extra, 8);
 }
 
-void ejecutarSecuenciaLargada() {
+void iniciarSecuenciaLargada() {
   if (secuencia_en_curso) {
     Serial.println("Ya en curso, ignorado");
     return;
   }
-  secuencia_en_curso = true;
   largadas_count++;
+  secuencia_en_curso = true;
+  seq_fase = SEQ_R1;
+  seq_inicio_fase = millis();
 
-  Serial.println(">>> LARGADA");
-
-  // R1 3s
   apagarTodo();
   digitalWrite(RELE_ROJO1, LOW);
-  Serial.println("R1");
+  Serial.println(">>> LARGADA: R1");
   updateDisplay("R1");
-  delay(3000);
+}
 
-  // R1+R2 3s
-  digitalWrite(RELE_ROJO2, LOW);
-  Serial.println("R1+R2");
-  updateDisplay("R1+R2");
-  delay(3000);
-
-  // R1+R2+R3 3s
-  digitalWrite(RELE_ROJO3, LOW);
-  Serial.println("R1+R2+R3");
-  updateDisplay("R1+R2+R3");
-  delay(3000);
-
-  // VERDE 3s
-  digitalWrite(RELE_ROJO1, HIGH);
-  digitalWrite(RELE_ROJO2, HIGH);
-  digitalWrite(RELE_ROJO3, HIGH);
-  digitalWrite(RELE_VERDE, LOW);
-  Serial.println("VERDE");
-  updateDisplay("VERDE");
-  delay(3000);
-
-  // OFF
-  apagarTodo();
-  Serial.println("OFF");
-  updateDisplay("ESPERA");
+void cancelarSecuencia() {
   secuencia_en_curso = false;
+  seq_fase = SEQ_IDLE;
+  apagarTodo();
+  Serial.println("Secuencia cancelada");
+  updateDisplay("ESPERA");
+}
+
+void actualizarSecuencia() {
+  if (!secuencia_en_curso) return;
+  uint32_t elapsed = millis() - seq_inicio_fase;
+
+  switch (seq_fase) {
+    case SEQ_R1:
+      if (elapsed >= SEQ_R1_MS) {
+        seq_fase = SEQ_R1R2;
+        seq_inicio_fase = millis();
+        digitalWrite(RELE_ROJO2, LOW);
+        Serial.println("R1+R2");
+        updateDisplay("R1+R2");
+      }
+      break;
+    case SEQ_R1R2:
+      if (elapsed >= SEQ_R2_MS) {
+        seq_fase = SEQ_R1R2R3;
+        seq_inicio_fase = millis();
+        digitalWrite(RELE_ROJO3, LOW);
+        Serial.println("R1+R2+R3");
+        updateDisplay("R1+R2+R3");
+      }
+      break;
+    case SEQ_R1R2R3:
+      if (elapsed >= SEQ_R3_MS) {
+        seq_fase = SEQ_VERDE;
+        seq_inicio_fase = millis();
+        digitalWrite(RELE_ROJO1, HIGH);
+        digitalWrite(RELE_ROJO2, HIGH);
+        digitalWrite(RELE_ROJO3, HIGH);
+        digitalWrite(RELE_VERDE, LOW);
+        Serial.println("VERDE");
+        updateDisplay("VERDE");
+      }
+      break;
+    case SEQ_VERDE:
+      if (elapsed >= SEQ_VERDE_MS) {
+        apagarTodo();
+        secuencia_en_curso = false;
+        seq_fase = SEQ_IDLE;
+        Serial.println("OFF");
+        updateDisplay("ESPERA");
+      }
+      break;
+    default:
+      break;
+  }
 }
 
 void procesarPaqueteLoRa(uint8_t* pkt, size_t len) {
@@ -203,12 +241,9 @@ void procesarPaqueteLoRa(uint8_t* pkt, size_t len) {
   ack_count++;
 
   if (tipo == CMD_SEMAFORO_LARGADA) {
-    ejecutarSecuenciaLargada();
+    iniciarSecuenciaLargada();
   } else if (tipo == CMD_RESET) {
-    Serial.println("RESET");
-    secuencia_en_curso = false;
-    apagarTodo();
-    updateDisplay("ESPERA");
+    cancelarSecuencia();
   }
 }
 
@@ -219,7 +254,7 @@ void procesarComandoSerial() {
 
     switch (c) {
       case 'l': case 'L':
-        ejecutarSecuenciaLargada();
+        iniciarSecuenciaLargada();
         break;
       case 'r': case 'R':
         Serial.println(">>> ROJOS ON");
@@ -309,6 +344,7 @@ void loop() {
   }
 
   procesarComandoSerial();
+  actualizarSecuencia();
 
   if (millis() - last_hb > HEARTBEAT_INTERVAL_MS) {
     enviarHeartbeat();

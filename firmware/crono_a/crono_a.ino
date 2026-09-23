@@ -78,6 +78,7 @@ SemaphoreHandle_t mutex_estado = NULL;
 // OTA
 TaskHandle_t http_task = NULL;
 volatile bool ota_en_curso = false;
+volatile uint32_t sensor_armado_hasta = 0;
 
 // ================== MAPPING PANEL ==================
 void drawLogicPixel(int x, int y, uint16_t color) {
@@ -153,6 +154,12 @@ void renderDisplay() {
   canvas->setCursor(16, 11);
   canvas->print(buf);
 
+  // Punto amarillo parpadeante si sensor armado
+  if (sensor_armado_hasta > millis() && (millis() / 300) % 2 == 0) {
+    uint16_t amarillo = display->color565(255, 200, 0);
+    canvas->fillRect(76, 18, 2, 2, amarillo);
+  }
+
   flushCanvas();
 }
 
@@ -161,12 +168,14 @@ void cmdStart() {
   Serial.println(">>> START");
   tiempo_inicio_ms = millis();
   tiempo_final_ms = 0;
+  sensor_armado_hasta = 0;
   estado = CORRIENDO;
 }
 
 void cmdStop() {
   Serial.println(">>> STOP");
   if (estado == CORRIENDO) tiempo_final_ms = millis() - tiempo_inicio_ms;
+  sensor_armado_hasta = 0;
   estado = PARADO;
 }
 
@@ -196,6 +205,11 @@ void cmdSetTripulacion(String numero, int v) {
     vuelta_actual = v;
     xSemaphoreGive(mutex_estado);
   }
+}
+
+void cmdSensorArmado(uint32_t segundos) {
+  Serial.printf(">>> SENSOR_ARMADO %lu s\n", segundos);
+  sensor_armado_hasta = millis() + segundos * 1000;
 }
 
 // ================== HTTP (Core 0 — tarea separada) ==================
@@ -249,6 +263,10 @@ bool consultarComandos() {
           String num = String(numero);
           int v = cmd["payload"]["vuelta"] | 1;
           cmdSetTripulacion(num, v);
+        }
+        else if (strcmp(tipo, "sensor_armado") == 0) {
+          uint32_t seg = cmd["payload"]["segundos"] | 35;
+          cmdSensorArmado(seg);
         }
 
         confirmarComando(cmd_id);
