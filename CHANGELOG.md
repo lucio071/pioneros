@@ -1,5 +1,40 @@
 # CHANGELOG — Sistema de Cronometraje Pioneros 4x4
 
+## 2026-09-23
+
+### A. Ventana sensor 35s (da4070a)
+- Backend habilitarSensor: duracion_seg 20 -> 35
+- Gateway lee duracion_seg del payload (no hardcoded 20)
+- Sensor HABILITADO_DURACION_MS 35000
+
+### B. Gateway: confirmar solo si se encolo (da4070a)
+- Si tx_q llena, no confirma al servidor (antes confirmaba y perdia el comando)
+
+### C. Semaforo: millis() sin delay (da4070a)
+- Maquina de estados (SEQ_R1, SEQ_R1R2, SEQ_R1R2R3, SEQ_VERDE)
+- Responde a RESET y heartbeat durante la secuencia
+- Tiempos configurables con #define
+
+### D. Indicador sensor armado (da4070a)
+- Backend crea comando sensor_armado para crono al habilitar sensor
+- Crono: punto amarillo 2x2 parpadeante en esquina inferior derecha
+- PWA: contador "Sensor armado: XXs" parpadeante amarillo->rojo
+
+### Gateway dual-core + ACK + deduplicacion (da4070a)
+- LoRa RX por interrupcion (onReceive) — nunca pierde paquetes durante HTTP
+- Ring buffer de 8 paquetes, procesados en Core 1
+- HTTP en Core 0 (polls, eventos, heartbeat)
+- ACK al sensor en cada cruce, deduplicacion por (src_id, seq)
+- CMD_HABILITAR_SENSOR enviado 3x como semaforo
+
+### Sensor cruce con reintento + delta_ms (da4070a)
+- Reenvio cada 300ms hasta ACK (max 10 intentos), seq fijo
+- delta_ms en paquete (ms desde cruce real) para precision
+- Backend resta delta_ms de now() para timestamp exacto
+
+### E. Manual actualizado (1ee401f)
+- Ventana 35s, semaforo millis, gateway dual-core, indicador sensor armado
+
 ## 2026-09-22
 
 ### 8. Eliminar fecha — solo admin (3768742)
