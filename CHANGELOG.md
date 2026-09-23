@@ -2,6 +2,38 @@
 
 ## 2026-09-23
 
+### 1. Precision timestamps (e0b53dd, dc9e84c)
+- Migracion: ALTER COLUMN TYPE timestamp(3) en comandos, eventos, estado
+- Modelos: $dateFormat = 'Y-m-d H:i:s.v', casts con .v
+- Fix: timestamp_servidor formateado con ->format() (fillable bypass $dateFormat)
+- Verificado: created_at muestra ms (09:38:00.812), diff medible
+
+### 2. Vuelta incorrecta (6f5b00d)
+- Causa: selectedVuelta persistia en localStorage de prueba anterior
+- PWA: calcularVueltaPendiente() busca primera vuelta sin tramos completos en ambas trips
+- Backend: armarLargadaDoble rechaza vuelta > 1 si anterior no completa/nula (422)
+- enviarTripulacionACrono ahora pasa vuelta_numero en payload
+
+### 3. Latencia sensor->crono (medicion)
+- Cruce real -> evento created_at: 187ms (curl localhost)
+- Evento -> stop created: 16ms (backend)
+- Total cruce -> stop: 203ms (sin WiFi real)
+- Pendiente: medir entregado_at con long polling real
+
+### 4. Limpieza
+- Borradas 3 fechas de prueba, 4 reales preservadas
+- Estados cronometraje en idle, comandos limpiados
+
+### 5. Prueba general
+- Fecha "Prueba general": doble, 3 vueltas, T3, 4 trips (#301-304), penal 5/10
+- Guion: V1 2 pares, ranking, V2 con abandono, DNF+reincorporar, finalizar
+
+### Manual: restaurado + tecnico separado (2bfac06)
+- MANUAL_USUARIO.md restaurado version operador (671 lineas)
+- MANUAL_TECNICO.md separado como doc tecnico
+- Ediciones puntuales: notebook N14-C2564, M18 laser, verde 5s, 35s ventana, abandono/DNF
+- CLAUDE.md: regla "nunca reescribir manual usuario"
+
 ### A. Ventana sensor 35s (da4070a)
 - Backend habilitarSensor: duracion_seg 20 -> 35
 - Gateway lee duracion_seg del payload (no hardcoded 20)
