@@ -1,6 +1,11 @@
 /*
  * PIONEROS 4x4 - GATEWAY LoRa <-> WiFi
  * Placa: LILYGO T3 V1.6.1
+ * DUAL-CORE: Core 1 = LoRa RX (interrupcion) + OLED, Core 0 = HTTP
+ *
+ * LoRa RX por interrupcion (onReceive) — nunca se pierde un paquete
+ * durante HTTP. Ring buffer de 8 paquetes. ACK para cruces.
+ * HTTP en Core 0: polls, eventos, heartbeat.
  */
 
 #include <SPI.h>
@@ -14,10 +19,11 @@
 #include <esp_task_wdt.h>
 
 // ================== CONFIGURACION ==================
-#include "config.h"   // WIFI_SSID, WIFI_PASS, TOKEN_SENSOR_A/B, TOKEN_SEMAFORO (no va al repo)
+#include "config.h"   // WIFI_SSID, WIFI_PASS, GW_TOKEN, TOKEN_SENSOR_A/B, TOKEN_SEMAFORO
 #define API_URL    "http://192.168.100.5"
 
-#define HTTP_TIMEOUT_MS  5000
+#define HTTP_TIMEOUT_MS    5000
+#define POLL_INTERVAL_MS   2000
 
 // ================== PINOUT T3 V1.6.1 ==================
 #define LORA_SCK   5
@@ -31,7 +37,6 @@
 // ================== PROTOCOLO LoRa ==================
 #define MAGIC              0xA5
 #define VERSION            0x01
-#define POLL_INTERVAL_MS   2000
 
 #define ID_GATEWAY   0
 #define ID_SENSOR_A  1
@@ -45,16 +50,60 @@
 #define CMD_RESET              0x12
 #define EV_ACK                 0xF0
 
+// ================== RING BUFFER LoRa RX ==================
+#define RX_BUF_SIZE  8
+struct RxPacket {
+  uint8_t data[20];
+  uint8_t len;
+  int rssi;
+};
+volatile RxPacket rx_buf[RX_BUF_SIZE];
+volatile uint8_t rx_head = 0;
+volatile uint8_t rx_tail = 0;
+volatile uint32_t rx_dropped = 0;
+
+// ================== COLA HTTP (LoRa -> HTTP) ==================
+#define HTTP_Q_SIZE  8
+struct HttpEvent {
+  uint8_t tipo;       // EV_CRUCE o EV_HEARTBEAT
+  uint8_t src_id;
+  uint8_t tramo;      // 'A' o 'B'
+  int16_t rssi;
+  uint16_t voltaje;
+  uint32_t uptime;
+  uint32_t delta_ms;  // ms desde el cruce real (para corregir tiempo)
+  uint32_t rx_at;     // millis() cuando se recibio
+};
+volatile HttpEvent http_q[HTTP_Q_SIZE];
+volatile uint8_t hq_head = 0;
+volatile uint8_t hq_tail = 0;
+
+// ================== COLA TX LoRa (HTTP -> LoRa) ==================
+#define TX_Q_SIZE  8
+struct TxCmd {
+  uint8_t dst_id;
+  uint8_t tipo;
+  uint8_t extra[4];
+  uint8_t extra_len;
+  uint8_t retries;  // cuantas veces enviar
+};
+volatile TxCmd tx_q[TX_Q_SIZE];
+volatile uint8_t tq_head = 0;
+volatile uint8_t tq_tail = 0;
+
 // ================== ESTADO ==================
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 uint16_t seq_tx = 0;
-uint32_t last_poll = 0;
 uint32_t rx_count = 0;
 uint32_t tx_count = 0;
 uint32_t http_ok = 0;
 uint32_t http_err = 0;
+uint32_t ack_sent = 0;
 int last_rssi = 0;
 bool wifi_connected = false;
+
+// Deduplicacion: ultimo seq por src_id
+uint16_t last_seq[4] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
 
 // ================== CRC16 CCITT ==================
 uint16_t crc16(uint8_t* data, size_t len) {
@@ -77,10 +126,12 @@ void updateDisplay() {
   display.print("GW ");
   display.println(wifi_connected ? "WiFi OK" : "SIN WIFI");
   display.println(WiFi.localIP());
-  display.print("LoRa RX:");
+  display.print("RX:");
   display.print(rx_count);
   display.print(" TX:");
-  display.println(tx_count);
+  display.print(tx_count);
+  display.print(" ACK:");
+  display.println(ack_sent);
   display.print("HTTP OK:");
   display.print(http_ok);
   display.print(" ER:");
@@ -90,10 +141,14 @@ void updateDisplay() {
   display.print(" Up:");
   display.print(millis() / 1000);
   display.println("s");
+  if (rx_dropped > 0) {
+    display.print("DROP:");
+    display.println(rx_dropped);
+  }
   display.display();
 }
 
-// ================== LORA TX ==================
+// ================== LoRa TX (desde Core 1) ==================
 void enviarComandoLoRa(uint8_t dst_id, uint8_t tipo, uint8_t* extra, size_t extra_len) {
   uint8_t packet[20];
   packet[0] = MAGIC;
@@ -119,13 +174,112 @@ void enviarComandoLoRa(uint8_t dst_id, uint8_t tipo, uint8_t* extra, size_t extr
   LoRa.beginPacket();
   LoRa.write(packet, payload_size);
   LoRa.endPacket();
-  LoRa.receive();
+  LoRa.receive();  // volver a RX continuo
   tx_count++;
-  Serial.printf("TX cmd 0x%02X -> id %d\n", tipo, dst_id);
 }
 
-// ================== HTTP CLIENT ==================
-bool enviarEventoApp(const char* token, const char* tramo) {
+void enviarACK(uint8_t dst_id, uint16_t seq_original) {
+  uint8_t extra[2];
+  extra[0] = seq_original & 0xFF;
+  extra[1] = (seq_original >> 8) & 0xFF;
+  enviarComandoLoRa(dst_id, EV_ACK, extra, 2);
+  ack_sent++;
+}
+
+// ================== LoRa RX CALLBACK (interrupcion) ==================
+void onLoRaReceive(int packetSize) {
+  if (packetSize <= 0 || packetSize > 20) return;
+
+  uint8_t next = (rx_head + 1) % RX_BUF_SIZE;
+  if (next == rx_tail) {
+    // Buffer lleno, descartar
+    rx_dropped++;
+    // Leer y tirar para limpiar el radio
+    while (LoRa.available()) LoRa.read();
+    return;
+  }
+
+  RxPacket* p = (RxPacket*)&rx_buf[rx_head];
+  p->len = 0;
+  while (LoRa.available() && p->len < 20) {
+    p->data[p->len++] = LoRa.read();
+  }
+  p->rssi = LoRa.packetRssi();
+  rx_head = next;
+}
+
+// ================== PROCESAR PAQUETE (Core 1) ==================
+void procesarPaquete(uint8_t* pkt, size_t len, int rssi) {
+  if (len < 9) return;
+  if (pkt[0] != MAGIC || pkt[1] != VERSION) return;
+
+  uint16_t crc_rx = pkt[len - 2] | (pkt[len - 1] << 8);
+  uint16_t crc_calc = crc16(pkt, len - 2);
+  if (crc_rx != crc_calc) return;
+
+  uint8_t src_id = pkt[2];
+  uint8_t tipo = pkt[4];
+  uint16_t seq = pkt[5] | (pkt[6] << 8);
+
+  rx_count++;
+  last_rssi = rssi;
+
+  if (tipo == EV_CRUCE) {
+    // Deduplicar por (src_id, seq)
+    if (src_id < 4 && seq == last_seq[src_id]) {
+      // Duplicado: reenviar ACK pero no encolar HTTP
+      enviarACK(src_id, seq);
+      Serial.printf("RX CRUCE DUP src=%d seq=%d\n", src_id, seq);
+      return;
+    }
+    if (src_id < 4) last_seq[src_id] = seq;
+
+    // Enviar ACK inmediato
+    enviarACK(src_id, seq);
+
+    // Extraer delta_ms del paquete (si viene, bytes 8-11 despues del tramo)
+    uint32_t delta_ms = 0;
+    if (len >= 9 + 2 + 4) {  // header(7) + tramo(1) + delta(4) + crc(2)
+      delta_ms = pkt[8] | (pkt[9] << 8) | (pkt[10] << 16) | (pkt[11] << 24);
+    }
+
+    // Encolar para HTTP
+    uint8_t next = (hq_head + 1) % HTTP_Q_SIZE;
+    if (next != hq_tail) {
+      HttpEvent* ev = (HttpEvent*)&http_q[hq_head];
+      ev->tipo = EV_CRUCE;
+      ev->src_id = src_id;
+      ev->tramo = (len >= 9 && pkt[7] != 0) ? pkt[7] : '?';
+      ev->delta_ms = delta_ms;
+      ev->rx_at = millis();
+      hq_head = next;
+    }
+
+    const char* tramo_str = src_id == ID_SENSOR_A ? "A" : src_id == ID_SENSOR_B ? "B" : "?";
+    Serial.printf("RX CRUCE tramo=%s seq=%d delta=%lums\n", tramo_str, seq, delta_ms);
+
+  } else if (tipo == EV_HEARTBEAT && len >= 17) {
+    int16_t hb_rssi = (int16_t)(pkt[7] | (pkt[8] << 8));
+    uint16_t voltaje = pkt[9] | (pkt[10] << 8);
+    uint32_t uptime = pkt[11] | (pkt[12] << 8) | (pkt[13] << 16) | (pkt[14] << 24);
+
+    // Encolar para HTTP
+    uint8_t next = (hq_head + 1) % HTTP_Q_SIZE;
+    if (next != hq_tail) {
+      HttpEvent* ev = (HttpEvent*)&http_q[hq_head];
+      ev->tipo = EV_HEARTBEAT;
+      ev->src_id = src_id;
+      ev->rssi = hb_rssi;
+      ev->voltaje = voltaje;
+      ev->uptime = uptime;
+      ev->rx_at = millis();
+      hq_head = next;
+    }
+  }
+}
+
+// ================== HTTP FUNCTIONS (Core 0) ==================
+bool enviarEventoApp(const char* token, const char* tramo, uint32_t delta_ms) {
   if (!wifi_connected) return false;
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
@@ -136,12 +290,13 @@ bool enviarEventoApp(const char* token, const char* tramo) {
   StaticJsonDocument<128> doc;
   doc["tipo"] = "cruce";
   doc["tramo"] = tramo;
+  if (delta_ms > 0) doc["delta_ms"] = delta_ms;
   String body;
   serializeJson(doc, body);
 
   int code = http.POST(body);
   http.end();
-  Serial.printf("POST /eventos tramo=%s => %d\n", tramo, code);
+  Serial.printf("POST /eventos tramo=%s delta=%lums => %d\n", tramo, delta_ms, code);
   if (code >= 200 && code < 300) { http_ok++; return true; }
   http_err++;
   return false;
@@ -187,19 +342,32 @@ void consultarComandos(const char* token, uint8_t dst_id) {
         const char* cmd_id = cmd["id"];
         if (!tipo || !cmd_id) continue;
 
-        if (strcmp(tipo, "habilitar_sensor") == 0) {
-          uint16_t dur = 20;
-          enviarComandoLoRa(dst_id, CMD_HABILITAR_SENSOR, (uint8_t*)&dur, 2);
-        } else if (strcmp(tipo, "semaforo_largada") == 0) {
-          // Enviar 3 veces para asegurar que llegue
-          for (int r = 0; r < 3; r++) {
-            enviarComandoLoRa(dst_id, CMD_SEMAFORO_LARGADA, NULL, 0);
-            if (r < 2) delay(200);
+        // Encolar TX LoRa
+        uint8_t next = (tq_head + 1) % TX_Q_SIZE;
+        if (next != tq_tail) {
+          TxCmd* tc = (TxCmd*)&tx_q[tq_head];
+          tc->dst_id = dst_id;
+          tc->extra_len = 0;
+          tc->retries = 1;
+
+          if (strcmp(tipo, "habilitar_sensor") == 0) {
+            tc->tipo = CMD_HABILITAR_SENSOR;
+            uint16_t dur = 20;
+            memcpy(tc->extra, &dur, 2);
+            tc->extra_len = 2;
+            tc->retries = 3;  // enviar 3x como semaforo
+          } else if (strcmp(tipo, "semaforo_largada") == 0) {
+            tc->tipo = CMD_SEMAFORO_LARGADA;
+            tc->retries = 3;
+          } else if (strcmp(tipo, "reset") == 0) {
+            tc->tipo = CMD_RESET;
+          } else {
+            continue;  // tipo desconocido, no encolar
           }
-        } else if (strcmp(tipo, "reset") == 0) {
-          enviarComandoLoRa(dst_id, CMD_RESET, NULL, 0);
+          tq_head = next;
         }
 
+        // Confirmar comando
         HTTPClient http2;
         http2.setTimeout(HTTP_TIMEOUT_MS);
         http2.begin(String(API_URL) + "/api/v1/cronometro/comandos/" + cmd_id + "/confirmar");
@@ -216,36 +384,71 @@ void consultarComandos(const char* token, uint8_t dst_id) {
   http.end();
 }
 
-// ================== LORA RX ==================
-void procesarPaqueteLoRa(uint8_t* pkt, size_t len) {
-  if (len < 9) return;
-  if (pkt[0] != MAGIC || pkt[1] != VERSION) return;
+// ================== TAREA HTTP (Core 0) ==================
+void tareaHTTP(void* param) {
+  uint32_t last_poll = 0;
+  uint32_t last_gw_hb = 0;
 
-  uint16_t crc_rx = pkt[len - 2] | (pkt[len - 1] << 8);
-  uint16_t crc_calc = crc16(pkt, len - 2);
-  if (crc_rx != crc_calc) return;
+  for (;;) {
+    wifi_connected = (WiFi.status() == WL_CONNECTED);
 
-  uint8_t src_id = pkt[2];
-  uint8_t tipo = pkt[4];
+    if (wifi_connected) {
+      // 1. Procesar cola HTTP (eventos LoRa -> servidor)
+      while (hq_tail != hq_head) {
+        HttpEvent ev = http_q[hq_tail];
+        hq_tail = (hq_tail + 1) % HTTP_Q_SIZE;
 
-  const char* token = NULL;
-  const char* tramo = NULL;
-  switch (src_id) {
-    case ID_SENSOR_A: token = TOKEN_SENSOR_A; tramo = "A"; break;
-    case ID_SENSOR_B: token = TOKEN_SENSOR_B; tramo = "B"; break;
-    case ID_SEMAFORO: token = TOKEN_SEMAFORO; break;
-  }
-  if (!token) return;
+        const char* token = NULL;
+        const char* tramo = NULL;
+        switch (ev.src_id) {
+          case ID_SENSOR_A: token = TOKEN_SENSOR_A; tramo = "A"; break;
+          case ID_SENSOR_B: token = TOKEN_SENSOR_B; tramo = "B"; break;
+          case ID_SEMAFORO: token = TOKEN_SEMAFORO; break;
+        }
+        if (!token) continue;
 
-  if (tipo == EV_CRUCE && tramo) {
-    Serial.printf("RX CRUCE tramo=%s\n", tramo);
-    enviarEventoApp(token, tramo);
-  } else if (tipo == EV_HEARTBEAT && len >= 17) {
-    int rssi = (int16_t)(pkt[7] | (pkt[8] << 8));
-    int voltaje = pkt[9] | (pkt[10] << 8);
-    uint32_t uptime = pkt[11] | (pkt[12] << 8) | (pkt[13] << 16) | (pkt[14] << 24);
-    Serial.printf("RX HB src=%d rssi=%d\n", src_id, rssi);
-    enviarHeartbeatApp(token, rssi, voltaje, uptime);
+        if (ev.tipo == EV_CRUCE && tramo) {
+          enviarEventoApp(token, tramo, ev.delta_ms);
+        } else if (ev.tipo == EV_HEARTBEAT) {
+          enviarHeartbeatApp(token, ev.rssi, ev.voltaje, ev.uptime);
+        }
+      }
+
+      // 2. Poll comandos cada POLL_INTERVAL_MS
+      if (millis() - last_poll > POLL_INTERVAL_MS) {
+        consultarComandos(TOKEN_SENSOR_A, ID_SENSOR_A);
+        consultarComandos(TOKEN_SENSOR_B, ID_SENSOR_B);
+        consultarComandos(TOKEN_SEMAFORO, ID_SEMAFORO);
+        last_poll = millis();
+      }
+
+      // 3. Heartbeat propio del gateway cada 5s
+      if (millis() - last_gw_hb > 5000) {
+        HTTPClient http;
+        http.setTimeout(HTTP_TIMEOUT_MS);
+        http.begin(String(API_URL) + "/api/v1/cronometro/heartbeat");
+        http.addHeader("Authorization", String("Bearer ") + GW_TOKEN);
+        http.addHeader("Content-Type", "application/json");
+        StaticJsonDocument<128> doc;
+        doc["rssi"] = WiFi.RSSI();
+        doc["voltaje_mv"] = 5000;
+        doc["uptime_sec"] = millis() / 1000;
+        String body;
+        serializeJson(doc, body);
+        http.POST(body);
+        http.end();
+        last_gw_hb = millis();
+      }
+    } else {
+      static uint32_t last_reconnect = 0;
+      if (millis() - last_reconnect > 5000) {
+        Serial.println("[WiFi] reconectando...");
+        WiFi.reconnect();
+        last_reconnect = millis();
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
 
@@ -254,6 +457,10 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
   delay(1000);
+
+  Serial.println("=====================================");
+  Serial.println("GATEWAY dual-core init");
+  Serial.println("=====================================");
 
   Wire.begin(21, 22);
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -275,19 +482,21 @@ void setup() {
   LoRa.setSpreadingFactor(9);
   LoRa.setSignalBandwidth(125E3);
   LoRa.setSyncWord(0x12);
+
+  // RX por interrupcion — nunca se pierde un paquete
+  LoRa.onReceive(onLoRaReceive);
   LoRa.receive();
-  display.println("LoRa OK");
+
+  display.println("LoRa OK (IRQ)");
   display.display();
 
   // WiFi — no bloqueante
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  display.println("WiFi conectando...");
-  display.display();
-  Serial.printf("WiFi iniciando conexion a %s (no-bloqueante)...\n", WIFI_SSID);
+  Serial.printf("WiFi conectando a %s...\n", WIFI_SSID);
 
-  // Watchdog 30s — reconfigura el WDT del framework
+  // Watchdog 30s
   esp_task_wdt_config_t wdt_config = {
     .timeout_ms = 30000,
     .idle_core_mask = 0,
@@ -296,57 +505,47 @@ void setup() {
   esp_task_wdt_reconfigure(&wdt_config);
   esp_task_wdt_add(NULL);
 
+  // Lanzar tarea HTTP en Core 0
+  xTaskCreatePinnedToCore(
+    tareaHTTP,
+    "http",
+    8192,
+    NULL,
+    1,
+    NULL,
+    0   // Core 0
+  );
+
+  Serial.println("Setup completo: Core 1=LoRa+OLED, Core 0=HTTP");
   updateDisplay();
 }
 
-// ================== LOOP ==================
+// ================== LOOP (Core 1 — LoRa + OLED) ==================
 void loop() {
-  wifi_connected = (WiFi.status() == WL_CONNECTED);
-
-  int packetSize = LoRa.parsePacket();
-  if (packetSize > 0 && packetSize <= 20) {
-    uint8_t pkt[20];
-    int i = 0;
-    while (LoRa.available() && i < 20) pkt[i++] = LoRa.read();
-    last_rssi = LoRa.packetRssi();
-    rx_count++;
-    procesarPaqueteLoRa(pkt, i);
-    LoRa.receive();
+  // 1. Procesar ring buffer de paquetes RX
+  while (rx_tail != rx_head) {
+    RxPacket pkt = rx_buf[rx_tail];
+    rx_tail = (rx_tail + 1) % RX_BUF_SIZE;
+    procesarPaquete(pkt.data, pkt.len, pkt.rssi);
   }
 
-  if (millis() - last_poll > POLL_INTERVAL_MS) {
-    consultarComandos(TOKEN_SENSOR_A, ID_SENSOR_A);
-    consultarComandos(TOKEN_SENSOR_B, ID_SENSOR_B);
-    consultarComandos(TOKEN_SEMAFORO, ID_SEMAFORO);
-    last_poll = millis();
+  // 2. Procesar cola TX LoRa (comandos del servidor)
+  while (tq_tail != tq_head) {
+    TxCmd cmd = tx_q[tq_tail];
+    tq_tail = (tq_tail + 1) % TX_Q_SIZE;
+    for (uint8_t r = 0; r < cmd.retries; r++) {
+      enviarComandoLoRa(cmd.dst_id, cmd.tipo, cmd.extra, cmd.extra_len);
+      if (r < cmd.retries - 1) delay(200);
+    }
+  }
+
+  // 3. Actualizar OLED cada 1s
+  static uint32_t last_display = 0;
+  if (millis() - last_display > 1000) {
     updateDisplay();
-  }
-
-  // Heartbeat propio del gateway cada 5s
-  static uint32_t last_gw_hb = 0;
-  if (wifi_connected && millis() - last_gw_hb > 5000) {
-    HTTPClient http;
-    http.setTimeout(HTTP_TIMEOUT_MS);
-    http.begin(String(API_URL) + "/api/v1/cronometro/heartbeat");
-    http.addHeader("Authorization", String("Bearer ") + GW_TOKEN);
-    http.addHeader("Content-Type", "application/json");
-    StaticJsonDocument<128> doc;
-    doc["rssi"] = WiFi.RSSI();
-    doc["voltaje_mv"] = 5000;
-    doc["uptime_sec"] = millis() / 1000;
-    String body;
-    serializeJson(doc, body);
-    http.POST(body);
-    http.end();
-    last_gw_hb = millis();
-  }
-
-  static uint32_t last_reconnect = 0;
-  if (!wifi_connected && millis() - last_reconnect > 5000) {
-    Serial.println("[WiFi] reconectando...");
-    WiFi.reconnect();
-    last_reconnect = millis();
+    last_display = millis();
   }
 
   esp_task_wdt_reset();
+  delay(5);  // yield
 }

@@ -71,6 +71,15 @@ volatile uint32_t cruce_isr_ms = 0;
 uint32_t ignorados_count = 0;
 uint32_t ruido_count = 0;
 
+// Reintento de cruce
+#define CRUCE_RETRY_MS     300
+#define CRUCE_MAX_RETRIES  10
+bool esperando_ack = false;
+uint16_t cruce_seq = 0;         // seq del cruce pendiente
+uint32_t cruce_timestamp = 0;   // millis() del cruce real
+uint32_t ultimo_reintento = 0;
+uint8_t reintentos = 0;
+
 void IRAM_ATTR sensorISR() {
   uint32_t ahora = millis();
   if (ahora - ultimo_cruce_isr_ms < DEBOUNCE_MS) return;
@@ -147,10 +156,41 @@ void enviarLoRa(uint8_t dst_id, uint8_t tipo, uint8_t* extra, size_t extra_len) 
   Serial.printf("TX tipo=0x%02X seq=%d\n", tipo, seq_tx - 1);
 }
 
-void enviarCruce() {
-  uint8_t tramo_byte = (uint8_t)TRAMO;
-  enviarLoRa(ID_GATEWAY, EV_CRUCE, &tramo_byte, 1);
+void enviarCruceConDelta(uint32_t t_cruce) {
+  uint32_t delta = millis() - t_cruce;
+  uint8_t extra[5];
+  extra[0] = (uint8_t)TRAMO;
+  extra[1] = delta & 0xFF;
+  extra[2] = (delta >> 8) & 0xFF;
+  extra[3] = (delta >> 16) & 0xFF;
+  extra[4] = (delta >> 24) & 0xFF;
+  // No incrementar seq_tx aqui — lo hace enviarLoRa
+  enviarLoRa(ID_GATEWAY, EV_CRUCE, extra, 5);
+}
+
+void iniciarCruce(uint32_t t_cruce) {
+  cruce_timestamp = t_cruce;
+  cruce_seq = seq_tx;  // seq que usara enviarLoRa
+  enviarCruceConDelta(t_cruce);
   cruces_count++;
+  esperando_ack = true;
+  reintentos = 1;
+  ultimo_reintento = millis();
+  Serial.printf("CRUCE enviado seq=%d\n", cruce_seq);
+}
+
+void reintentarCruce() {
+  if (!esperando_ack) return;
+  if (millis() - ultimo_reintento < CRUCE_RETRY_MS) return;
+  if (reintentos >= CRUCE_MAX_RETRIES) {
+    Serial.println("CRUCE: max reintentos, desistiendo");
+    esperando_ack = false;
+    return;
+  }
+  enviarCruceConDelta(cruce_timestamp);
+  reintentos++;
+  ultimo_reintento = millis();
+  Serial.printf("CRUCE reintento %d/%d\n", reintentos, CRUCE_MAX_RETRIES);
 }
 
 void enviarHeartbeat() {
@@ -180,7 +220,13 @@ void procesarPaqueteLoRa(uint8_t* pkt, size_t len) {
   if (dst_id != SRC_ID && dst_id != 0xFF) return;
   last_ack_ms = millis();
   ack_count++;
-  if (tipo == CMD_HABILITAR_SENSOR) {
+  if (tipo == EV_ACK && len >= 11) {
+    uint16_t ack_seq = pkt[7] | (pkt[8] << 8);
+    if (esperando_ack && ack_seq == cruce_seq) {
+      esperando_ack = false;
+      Serial.printf("ACK recibido para seq=%d tras %d intentos\n", ack_seq, reintentos);
+    }
+  } else if (tipo == CMD_HABILITAR_SENSOR) {
     uint16_t dur_seg = pkt[7] | (pkt[8] << 8);
     if (dur_seg == 0) dur_seg = 20;
     habilitado = true;
@@ -202,7 +248,7 @@ void procesarComandoSerial() {
         Serial.println(">>> SIMULANDO CRUCE");
         if (habilitado) {
           digitalWrite(LED_PIN, HIGH);
-          enviarCruce();
+          iniciarCruce(millis());
           updateDisplay();
           delay(100);
           digitalWrite(LED_PIN, LOW);
@@ -223,9 +269,10 @@ void procesarComandoSerial() {
         updateDisplay();
         break;
       case 's': case 'S':
-        Serial.printf(">>> Estado: %s | Cruces: %d | Ignorados: %d | ACK: %d | RSSI: %d | Ruido: %d | Haz: %s | Up: %ds\n",
+        Serial.printf(">>> Estado: %s | Cruces: %d | Ign: %d | ACK: %d | RSSI: %d | Ruido: %d | Haz: %s | Pend: %s | Up: %ds\n",
                       habilitado ? "ON" : "OFF", cruces_count, ignorados_count, ack_count, last_rssi, ruido_count,
-                      digitalRead(SENSOR_PIN) == SENSOR_ACTIVO ? "CORTADO" : "libre", millis()/1000);
+                      digitalRead(SENSOR_PIN) == SENSOR_ACTIVO ? "CORTADO" : "libre",
+                      esperando_ack ? "SI" : "no", millis()/1000);
         break;
       case '\n': case '\r': break;
       default:
@@ -285,7 +332,7 @@ void procesarCruceSensor() {
   }
   if (habilitado) {
     digitalWrite(LED_PIN, HIGH);
-    enviarCruce();
+    iniciarCruce(cruce_isr_ms);
     Serial.println(">>> CRUCE SENSOR");
     updateDisplay();
     digitalWrite(LED_PIN, LOW);
@@ -307,6 +354,7 @@ void loop() {
     updateDisplay();
   }
   procesarCruceSensor();
+  reintentarCruce();
   if (habilitado && millis() > habilitado_hasta) {
     habilitado = false;
     Serial.println("Habilitacion expirada");

@@ -111,13 +111,18 @@ class CronometroController extends Controller
         $data = $request->validate([
             'tipo' => 'required|string',
             'tramo' => 'nullable|in:A,B',
+            'delta_ms' => 'nullable|integer|min:0',
         ]);
+
+        // Corregir timestamp por delta del sensor (ms entre cruce real y envio)
+        $deltaMs = (int) ($data['delta_ms'] ?? 0);
+        $timestampReal = now()->subMilliseconds($deltaMs);
 
         $evento = EventoCronometro::create([
             'dispositivo_id' => $dispositivo->id,
             'tipo' => $data['tipo'],
             'tramo' => $data['tramo'] ?? $dispositivo->tramo,
-            'timestamp_servidor' => now(),
+            'timestamp_servidor' => $timestampReal,
             'procesado' => false,
         ]);
 
@@ -132,7 +137,7 @@ class CronometroController extends Controller
             foreach ($estados as $estado) {
                 if ($estado->fase === 'esperando_largada' && $sensorCodigo === $estado->sensor_largada_codigo) {
                     // LARGADA detectada
-                    $estado->registrarLargada();
+                    $estado->registrarLargada($timestampReal);
                     $evento->update(['procesado' => true]);
 
                     // Marcar vuelta como largada
@@ -165,7 +170,7 @@ class CronometroController extends Controller
                 } elseif ($estado->fase === 'esperando_llegada' && $sensorCodigo === $estado->sensor_llegada_codigo) {
                     // LLEGADA detectada
                     if ($estado->largada_at) {
-                        $tiempoMs = (int) abs(round(now()->diffInMilliseconds($estado->largada_at)));
+                        $tiempoMs = (int) abs(round($timestampReal->diffInMilliseconds($estado->largada_at)));
 
                         // Mandar STOP + SET_TIEMPO al cronometro de esta pista
                         $crono = DispositivoCronometro::where('codigo', $estado->crono_codigo)->first();
