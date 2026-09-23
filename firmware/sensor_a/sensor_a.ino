@@ -1,7 +1,10 @@
 /*
  * PIONEROS 4x4 - SENSOR-A LoRa
  * Placa: LILYGO T3 V1.6.1
- * Sensor: M18 laser PNP dark-on (12V) via opto PC817 HY-M154 -> GPIO34, interrupcion RISING
+ * Sensor: M18 laser PNP dark-on (12V) via opto HY-M154 -> GPIO34
+ *   Cableado A (SENSOR_ACTIVO HIGH): V->3V3, G->GPIO34, 20k de GPIO34 a GND. Reposo=0, haz cortado=1
+ *   Cableado B (SENSOR_ACTIVO LOW):  V->GPIO34, G->GND, 20k de GPIO34 a 3V3. Reposo=1, haz cortado=0
+ *   En ambos: 100nF entre GPIO34 y GND (la TX LoRa induce ruido en el pin)
  *
  * Comandos serie (115200):
  *   c = simular cruce
@@ -28,8 +31,10 @@
 #define LORA_DIO0  26
 #define LED_PIN    25
 
-#define SENSOR_PIN     34      // salida opto (emisor) + 10k a GND, solo entrada
-#define DEBOUNCE_MS    2000   // ignora cortes repetidos del mismo vehiculo
+#define SENSOR_PIN     34      // solo entrada, sin pull interno
+#define SENSOR_ACTIVO  HIGH    // nivel del pin con el haz cortado (HIGH=cableado A, LOW=cableado B)
+#define CONFIRM_MS     20      // el pin debe seguir activo tras 20ms, si no era ruido
+#define DEBOUNCE_MS    3000    // ignora cortes repetidos del mismo vehiculo
 
 #define MAGIC         0xA5
 #define VERSION       0x01
@@ -62,12 +67,15 @@ uint32_t habilitado_hasta = 0;
 
 volatile bool cruce_pendiente = false;
 volatile uint32_t ultimo_cruce_isr_ms = 0;
+volatile uint32_t cruce_isr_ms = 0;
 uint32_t ignorados_count = 0;
+uint32_t ruido_count = 0;
 
 void IRAM_ATTR sensorISR() {
   uint32_t ahora = millis();
   if (ahora - ultimo_cruce_isr_ms < DEBOUNCE_MS) return;
   ultimo_cruce_isr_ms = ahora;
+  cruce_isr_ms = ahora;
   cruce_pendiente = true;
 }
 
@@ -215,9 +223,9 @@ void procesarComandoSerial() {
         updateDisplay();
         break;
       case 's': case 'S':
-        Serial.printf(">>> Estado: %s | Cruces: %d | Ignorados: %d | ACK: %d | RSSI: %d | Sensor: %d | Up: %ds\n",
-                      habilitado ? "ON" : "OFF", cruces_count, ignorados_count, ack_count, last_rssi,
-                      digitalRead(SENSOR_PIN), millis()/1000);
+        Serial.printf(">>> Estado: %s | Cruces: %d | Ignorados: %d | ACK: %d | RSSI: %d | Ruido: %d | Haz: %s | Up: %ds\n",
+                      habilitado ? "ON" : "OFF", cruces_count, ignorados_count, ack_count, last_rssi, ruido_count,
+                      digitalRead(SENSOR_PIN) == SENSOR_ACTIVO ? "CORTADO" : "libre", millis()/1000);
         break;
       case '\n': case '\r': break;
       default:
@@ -229,7 +237,7 @@ void procesarComandoSerial() {
 void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
-  pinMode(SENSOR_PIN, INPUT);   // GPIO34 no tiene pull-down interno; el 10k externo a GND lo fija en LOW
+  pinMode(SENSOR_PIN, INPUT);   // GPIO34 no tiene pull interno; lo fija la resistencia externa
   delay(1000);
   Wire.begin(21, 22);
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -260,15 +268,21 @@ void setup() {
   Serial.println("=====================================");
   delay(2000);
   updateDisplay();
-  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), sensorISR, RISING);
-  Serial.printf("Sensor M18 en GPIO%d (RISING, debounce %dms)\n", SENSOR_PIN, DEBOUNCE_MS);
+  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), sensorISR, SENSOR_ACTIVO == HIGH ? RISING : FALLING);
+  Serial.printf("Sensor M18 en GPIO%d (activo=%s, confirm %dms, debounce %dms)\n",
+                SENSOR_PIN, SENSOR_ACTIVO == HIGH ? "HIGH" : "LOW", CONFIRM_MS, DEBOUNCE_MS);
 }
 
 void procesarCruceSensor() {
   if (!cruce_pendiente) return;
+  if (millis() - cruce_isr_ms < CONFIRM_MS) return;   // esperar a confirmar
   noInterrupts();
   cruce_pendiente = false;
   interrupts();
+  if (digitalRead(SENSOR_PIN) != SENSOR_ACTIVO) {      // ya no esta cortado: fue ruido
+    ruido_count++;
+    return;
+  }
   if (habilitado) {
     digitalWrite(LED_PIN, HIGH);
     enviarCruce();

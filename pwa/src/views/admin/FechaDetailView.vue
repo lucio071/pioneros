@@ -385,8 +385,24 @@ async function enviarComandoCrono(tipo: string) {
   }
 }
 
+async function autoReincorporar(trip: any): Promise<boolean> {
+  if (!trip || trip.estado !== 'abandonado') return true
+  if (!confirm(`#${trip.numero} está en DNF. ¿Reincorporar para que pueda largar?`)) return false
+  await apiMutate('POST', `/tripulaciones/${trip.id}/reincorporar`)
+  showToast(`#${trip.numero} reincorporado`)
+  return true
+}
+
 async function armarLargada() {
   try {
+    // Auto-reincorporar si alguna trip está en DNF
+    const tripsAChequear = selectedTripB.value
+      ? [tripEnPistaA.value, tripEnPistaB.value]
+      : [selectedTrip.value]
+    for (const t of tripsAChequear) {
+      if (!(await autoReincorporar(t))) return
+    }
+
     if (selectedTripB.value) {
       // Pista doble: usa endpoint que arma ambas pistas + semaforo + sensores
       const tripA = tripEnPistaA.value
@@ -665,9 +681,32 @@ function cargarTramoEnForm(form: any, tr: any) {
   form.value.tiempos_muertos = (tr.tiempos_muertos || []).map((tm: any) => tm.segundos || tm)
 }
 
-async function abandonarTrip(trip: any) {
+async function marcarDNF(trip: any) {
+  if (!confirm(`DNF — #${trip.numero} NO CORRE MÁS\n\nSe retira de la fecha.\nSus vueltas quedan como están.\n¿Confirmar?`)) return
+  try {
+    await apiMutate('POST', `/tripulaciones/${trip.id}/abandonar`)
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200])
+    showToast(`#${trip.numero} marcado como DNF`)
+    await load()
+  } catch (e: any) {
+    showToast(e.message || 'Error', 'error')
+  }
+}
+
+async function reincorporarTrip(trip: any) {
+  if (!confirm(`Reincorporar #${trip.numero}?\n\nVuelve a estar habilitado para correr.`)) return
+  try {
+    await apiMutate('POST', `/tripulaciones/${trip.id}/reincorporar`)
+    showToast(`#${trip.numero} reincorporado`)
+    await load()
+  } catch (e: any) {
+    showToast(e.message || 'Error', 'error')
+  }
+}
+
+async function abandonarVuelta(trip: any) {
   if (!trip) return
-  if (!confirm(`ABANDONAR #${trip.numero} en esta vuelta?\n\nSu vuelta V${selectedVuelta.value} quedará NULA.\nLa otra tripulación sigue corriendo.`)) return
+  if (!confirm(`#${trip.numero} ABANDONA ESTA VUELTA\n\nV${selectedVuelta.value} quedará NULA (corrida 1 + 2).\nLa otra tripulación sigue corriendo.\nPuede volver a largar en la vuelta siguiente.`)) return
 
   try {
     // Crear tramo vacío para que exista la vuelta, luego marcar nula
@@ -848,6 +887,8 @@ async function eliminarFecha() {
 async function finalizarFecha() {
   const cats = fechaCategorias.value.length
   const trips = tripulaciones.value.length
+  const dnfTrips = tripulaciones.value.filter((t: any) => t.estado === 'abandonado')
+  const dnfList = dnfTrips.map((t: any) => `#${t.numero} ${t.nombre}`).join('\n')
   const msg = `FINALIZAR FECHA
 
 Una vez finalizada NO se puede:
@@ -859,7 +900,7 @@ Solo el administrador podra modificar puntos.
 
 Categorias: ${cats}
 Tripulaciones: ${trips}
-
+${dnfTrips.length ? `\nDNF (1 punto):\n${dnfList}\n` : ''}
 Estas seguro?`
   if (!confirm(msg)) return
   await apiMutate('POST', `/fechas/${route.params.id}/finalizar`)
@@ -1175,6 +1216,10 @@ if (typeof window !== 'undefined') {
                 <span :class="['text-[10px] px-1.5 py-0.5 rounded-full', estadoColor(t.estado)]">
                   {{ estadoLabel(t.estado) }}
                 </span>
+                <button v-if="t.estado !== 'abandonado'" @click.stop="marcarDNF(t)"
+                  class="text-[9px] bg-red-50 text-red-500 px-1.5 py-0.5 rounded hover:bg-red-100">DNF</button>
+                <button v-else @click.stop="reincorporarTrip(t)"
+                  class="text-[9px] bg-green-50 text-green-600 px-1.5 py-0.5 rounded hover:bg-green-100">Reinc.</button>
               </div>
             </button>
           </div>
@@ -1445,15 +1490,15 @@ if (typeof window !== 'undefined') {
               V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }} completa &#x2713;
             </div>
 
-            <!-- Abandonar trip (pista doble) -->
+            <!-- Abandonar vuelta (pista doble) -->
             <div v-if="selectedTripB" class="grid grid-cols-2 gap-2">
-              <button @click="abandonarTrip(tripEnPistaA)"
+              <button @click="abandonarVuelta(tripEnPistaA)"
                 class="bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2 rounded-lg text-xs transition-colors">
-                Abandono #{{ tripEnPistaA?.numero }}
+                #{{ tripEnPistaA?.numero }} abandona vuelta
               </button>
-              <button @click="abandonarTrip(tripEnPistaB)"
+              <button @click="abandonarVuelta(tripEnPistaB)"
                 class="bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2 rounded-lg text-xs transition-colors">
-                Abandono #{{ tripEnPistaB?.numero }}
+                #{{ tripEnPistaB?.numero }} abandona vuelta
               </button>
             </div>
 
