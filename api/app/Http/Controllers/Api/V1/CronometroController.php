@@ -75,7 +75,7 @@ class CronometroController extends Controller
         } while (true);
 
         foreach ($comandos as $cmd) {
-            $cmd->update(['estado' => 'entregado', 'entregado_at' => now()]);
+            $cmd->update(['estado' => 'entregado', 'entregado_at' => now()->format('Y-m-d H:i:s.v')]);
         }
 
         return response()->json([
@@ -95,7 +95,7 @@ class CronometroController extends Controller
             ->where('dispositivo_id', $dispositivo->id)
             ->firstOrFail();
 
-        $comando->update(['estado' => 'ejecutado', 'ejecutado_at' => now()]);
+        $comando->update(['estado' => 'ejecutado', 'ejecutado_at' => now()->format('Y-m-d H:i:s.v')]);
 
         return response()->json(['ok' => true]);
     }
