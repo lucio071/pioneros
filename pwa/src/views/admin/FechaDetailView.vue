@@ -5,6 +5,7 @@ import { apiFetch, apiMutate } from '../../api'
 import { useOfflineStore } from '../../stores/offline'
 import { formatTiempo, formatDiferencia, estadoLabel, estadoColor, faseLabel, faseColor } from '../../utils'
 import { useToast } from '../../composables/useToast'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,6 +19,7 @@ const rankingData = ref<any>(null)
 const tab = ref<'ranking' | 'cronometraje' | 'inscripcion' | 'config'>('config')
 const loading = ref(true)
 const { toast, showToast } = useToast()
+const auth = useAuthStore()
 
 // Config - catalogo para agregar categorias
 const catalogo = ref<any[]>([])
@@ -880,9 +882,21 @@ async function activarFecha() {
 }
 
 async function eliminarFecha() {
-  if (!confirm('Eliminar esta fecha? Se borran todas las tripulaciones y datos.')) return
-  await apiMutate('DELETE', `/fechas/${route.params.id}`)
-  router.push('/admin')
+  if (['activa', 'finalizada', 'en_curso'].includes(fecha.value?.estado)) {
+    const nombre = prompt(`ELIMINAR FECHA "${fecha.value.nombre}"\n\nEsta fecha tiene datos de carrera.\nSe borran TODAS las tripulaciones, vueltas, tiempos.\n\nEscribi el nombre de la fecha para confirmar:`)
+    if (nombre !== fecha.value.nombre) {
+      showToast('Nombre incorrecto, no se elimino', 'error')
+      return
+    }
+  } else {
+    if (!confirm('Eliminar esta fecha? Se borran todas las tripulaciones y datos.')) return
+  }
+  try {
+    await apiMutate('DELETE', `/fechas/${route.params.id}`)
+    router.push('/admin')
+  } catch (e: any) {
+    showToast(e.message || 'Error al eliminar', 'error')
+  }
 }
 async function finalizarFecha() {
   const cats = fechaCategorias.value.length
@@ -1651,9 +1665,6 @@ if (typeof window !== 'undefined') {
               class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg">Configurar fecha</button>
             <button v-if="fechaCategorias.length > 0" @click="activarFecha"
               class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg">Activar fecha</button>
-
-            <button @click="eliminarFecha"
-              class="w-full bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2.5 rounded-lg">Eliminar fecha</button>
           </template>
 
           <!-- Despues de activar: solo finalizar -->
@@ -1663,6 +1674,10 @@ if (typeof window !== 'undefined') {
           <p v-if="fechaEditable && fechaCategorias.length === 0" class="text-sm text-gray-400 text-center py-2">
             Agrega al menos una categoria para poder activar la fecha.
           </p>
+
+          <!-- Eliminar: solo admin, cualquier estado -->
+          <button v-if="auth.isAdmin" @click="eliminarFecha"
+            class="w-full bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2.5 rounded-lg mt-4">Eliminar fecha</button>
         </div>
       </div>
     </main>
