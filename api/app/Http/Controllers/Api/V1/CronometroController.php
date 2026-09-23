@@ -304,7 +304,7 @@ class CronometroController extends Controller
         $this->habilitarSensor($data['sensor_largada_codigo'], $request->user()->id);
 
         // Enviar numero al crono
-        $this->enviarTripulacionACrono($data['crono_codigo'], $data['tripulacion_id'], $request->user()->id);
+        $this->enviarTripulacionACrono($data['crono_codigo'], $data['tripulacion_id'], $request->user()->id, $data['vuelta_numero']);
 
         // Activar semaforo
         $this->activarSemaforo($request->user()->id);
@@ -326,6 +326,28 @@ class CronometroController extends Controller
         ]);
 
         $userId = $request->user()->id;
+        $vueltaNum = (int) $data['vuelta_numero'];
+
+        // Validar que la vuelta anterior esté completa o nula
+        if ($vueltaNum > 1) {
+            $tripIds = array_filter([$data['tripulacion_a_id'], $data['tripulacion_b_id'] ?? null]);
+            foreach ($tripIds as $tripId) {
+                $trip = \App\Models\Tripulacion::find($tripId);
+                if (!$trip) continue;
+                $fc = $trip->fechaCategoria;
+                $vAnterior = $trip->vueltas()->where('numero_vuelta', $vueltaNum - 1)->where('fase', 'clasificacion')->first();
+                if (!$vAnterior) {
+                    return response()->json(['message' => "Tripulación #{$trip->numero}: V" . ($vueltaNum - 1) . " no existe. No se puede armar V{$vueltaNum}."], 422);
+                }
+                if (!$vAnterior->nula) {
+                    $letras = $vAnterior->tramos->pluck('letra')->toArray();
+                    $completa = in_array('A', $letras) && in_array('B', $letras);
+                    if (!$completa) {
+                        return response()->json(['message' => "Tripulación #{$trip->numero}: V" . ($vueltaNum - 1) . " incompleta. No se puede armar V{$vueltaNum}."], 422);
+                    }
+                }
+            }
+        }
 
         // Pista A: crono-a, sensor-a
         $estadoA = EstadoCronometraje::porTramo('A');
@@ -334,7 +356,7 @@ class CronometroController extends Controller
             'crono-a', 'sensor-a', 'sensor-a', $data['tramo_letra_a']
         );
         $this->habilitarSensor('sensor-a', $userId);
-        $this->enviarTripulacionACrono('crono-a', $data['tripulacion_a_id'], $userId);
+        $this->enviarTripulacionACrono('crono-a', $data['tripulacion_a_id'], $userId, $vueltaNum);
 
         // Pista B: crono-b, sensor-b
         if (!empty($data['tripulacion_b_id'])) {
@@ -344,7 +366,7 @@ class CronometroController extends Controller
                 'crono-b', 'sensor-b', 'sensor-b', $data['tramo_letra_b']
             );
             $this->habilitarSensor('sensor-b', $userId);
-            $this->enviarTripulacionACrono('crono-b', $data['tripulacion_b_id'], $userId);
+            $this->enviarTripulacionACrono('crono-b', $data['tripulacion_b_id'], $userId, $vueltaNum);
         }
 
         // Semaforo
@@ -486,7 +508,7 @@ class CronometroController extends Controller
         }
     }
 
-    private function enviarTripulacionACrono(string $cronoCodigo, string $tripId, ?string $userId): void
+    private function enviarTripulacionACrono(string $cronoCodigo, string $tripId, ?string $userId, int $vuelta = 1): void
     {
         $crono = DispositivoCronometro::where('codigo', $cronoCodigo)->first();
         $trip = \App\Models\Tripulacion::find($tripId);
@@ -494,7 +516,7 @@ class CronometroController extends Controller
             ComandoCronometro::create([
                 'dispositivo_id' => $crono->id,
                 'tipo' => 'set_tripulacion',
-                'payload' => ['numero' => (int) $trip->numero],
+                'payload' => ['numero' => (int) $trip->numero, 'vuelta' => $vuelta],
                 'creado_por_user_id' => $userId,
             ]);
         }

@@ -87,15 +87,8 @@ function iniciarParManual() {
   corrida1Guardada.value = false
   startCronoPolling()
 
-  // Seleccionar trip A como principal
   selectedTrip.value = tripA
-  const done = (tripA.vueltas || []).filter((v: any) => v.fase === 'clasificacion').map((v: any) => v.numero_vuelta)
-  for (let i = 1; i <= (fecha.value?.vueltas_clasificacion || 1); i++) {
-    if (!done.includes(i)) { selectedVuelta.value = i; break }
-  }
-  if (done.length >= (fecha.value?.vueltas_clasificacion || 1)) {
-    selectedVuelta.value = done.length > 0 ? done[done.length - 1] : 1
-  }
+  selectedVuelta.value = calcularVueltaPendiente(tripA, tripB)
   resetTramoForms()
 
   // Mandar numeros a cronometros fisicos
@@ -141,11 +134,13 @@ function restaurarParActivo() {
     if (data.tripBId) {
       selectedTripB.value = tripulaciones.value.find((t: any) => t.id === data.tripBId) || null
     }
-    selectedVuelta.value = data.vuelta || 1
+    // Calcular vuelta pendiente basada en datos reales, no localStorage
+    const tripBRestored = data.tripBId ? tripulaciones.value.find((t: any) => t.id === data.tripBId) : null
+    selectedVuelta.value = calcularVueltaPendiente(selectedTrip.value, tripBRestored)
     corridaActual.value = 1
-    // Verificar si corrida 1 realmente tiene datos
-    const restoredTrip = tripulaciones.value.find((t: any) => t.id === data.tripAId)
-    const tieneTramoA = restoredTrip?.vueltas?.some((v: any) => v.tramos?.some((tr: any) => tr.letra === 'A' && tr.tiempo_ms > 0))
+    // Verificar si corrida 1 de la vuelta actual tiene datos
+    const vActual = selectedTrip.value?.vueltas?.find((v: any) => v.numero_vuelta === selectedVuelta.value && v.fase === 'clasificacion')
+    const tieneTramoA = vActual?.tramos?.some((tr: any) => tr.letra === 'A' && tr.tiempo_ms > 0)
     corrida1Guardada.value = !!tieneTramoA
     if (corrida1Guardada.value && data.corrida === 2) {
       corridaActual.value = 2
@@ -650,6 +645,27 @@ function selectTrip(t: any) {
     selectedVuelta.value = done.length > 0 ? done[done.length - 1] : 1
   }
   resetTramoForms()
+}
+
+function calcularVueltaPendiente(tripA: any, tripB: any): number {
+  const total = fecha.value?.vueltas_clasificacion || 1
+  for (let n = 1; n <= total; n++) {
+    // Vuelta completa = ambas trips tienen tramo A y B con tiempo > 0
+    const fase = 'clasificacion'
+    const vA = (tripA?.vueltas || []).find((v: any) => v.numero_vuelta === n && v.fase === fase)
+    const vB = (tripB?.vueltas || []).find((v: any) => v.numero_vuelta === n && v.fase === fase)
+    const aCompleta = vA?.tramos?.some((tr: any) => tr.letra === 'A' && tr.tiempo_ms > 0)
+      && vA?.tramos?.some((tr: any) => tr.letra === 'B' && tr.tiempo_ms > 0)
+    const bCompleta = tripB
+      ? (vB?.tramos?.some((tr: any) => tr.letra === 'A' && tr.tiempo_ms > 0)
+        && vB?.tramos?.some((tr: any) => tr.letra === 'B' && tr.tiempo_ms > 0))
+      : true
+    const nula = vA?.nula || vB?.nula
+    if (!aCompleta || !bCompleta) {
+      if (!nula) return n  // primera vuelta no completa y no nula
+    }
+  }
+  return total  // todas completas, quedar en la ultima
 }
 
 function vueltaCompleta(n: number): boolean {
