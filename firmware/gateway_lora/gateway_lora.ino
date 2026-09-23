@@ -17,7 +17,7 @@
 #include "config.h"   // WIFI_SSID, WIFI_PASS, TOKEN_SENSOR_A/B, TOKEN_SEMAFORO (no va al repo)
 #define API_URL    "http://192.168.100.5"
 
-#define HTTP_TIMEOUT_MS  2000
+#define HTTP_TIMEOUT_MS  5000
 
 // ================== PINOUT T3 V1.6.1 ==================
 #define LORA_SCK   5
