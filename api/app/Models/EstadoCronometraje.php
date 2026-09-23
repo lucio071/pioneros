@@ -16,8 +16,10 @@ class EstadoCronometraje extends Model
     ];
 
     protected $casts = [
-        'largada_at' => 'datetime',
+        'largada_at' => 'datetime:Y-m-d H:i:s.v',
     ];
+
+    protected $dateFormat = 'Y-m-d H:i:s.v';
 
     public function tripulacion(): BelongsTo
     {
