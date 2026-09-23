@@ -30,6 +30,7 @@ Los sensores miden, los cronometros muestran, la app calcula.
 - **Muestra**: P:A #numero V:vuelta + tiempo (verde corriendo, rojo parado)
 - **Comandos**: por long polling — el servidor responde al instante cuando hay comando (~25ms latencia)
 - **Heartbeat**: dentro del mismo GET, cada <=10s
+- **Indicador sensor armado**: punto amarillo 2x2 parpadeante en esquina inferior derecha cuando el sensor esta habilitado; se limpia con start/stop/reset o al vencer
 - **Watchdog**: sin respuesta 30s -> reconecta WiFi; 3 min -> reinicia solo
 - **OTA**: actualizable por WiFi (hostname crono-a / crono-b)
 - **Arduino IDE**: Placa ESP32S3 Dev Module, USB CDC On Boot: Enabled
@@ -41,7 +42,9 @@ Los sensores miden, los cronometros muestran, la app calcula.
 - **Conexion a placa**: via modulo opto HY-M154 -> GPIO34
 - **Voltaje placa**: 3.3V (alimentar por 3V3, NO por 5V)
 - **Conexion LoRa**: 433MHz -> gateway -> servidor
-- **Habilitacion**: por comando del servidor, ventana de 20 segundos
+- **Habilitacion**: por comando del servidor, ventana de 35 segundos
+- **Reintento**: el sensor reenvía el cruce cada 300ms hasta recibir ACK del gateway (max 10 intentos)
+- **delta_ms**: cada paquete incluye los ms desde el cruce real, para que el backend corrija el tiempo
 - **Debounce**: tras un cruce ignora 3 segundos (evita doble deteccion del mismo vehiculo)
 - **Filtro de ruido**: el pin debe estar activo 20ms continuo, si no se descarta como ruido
 - **OLED muestra**: estado (ON/ESPERA), cruces, ACK, RSSI, GW (OK si recibio comando en <30s)
@@ -55,6 +58,8 @@ Los sensores miden, los cronometros muestran, la app calcula.
   - Verde: GPIO 25
 - **Voltaje**: 12V (para los reles y luces)
 - **Secuencia largada**: R1 3s -> R1+R2 3s -> R1+R2+R3 3s -> Verde 3s -> OFF (12s total)
+- **Maquina de estados**: sin delay(), responde a RESET y heartbeat durante la secuencia
+- **Tiempos configurables**: #define SEQ_R1_MS, SEQ_R2_MS, SEQ_R3_MS, SEQ_VERDE_MS
 - **Conexion**: LoRa -> gateway
 - **Reintento**: el gateway envia el comando 3 veces con 200ms entre cada uno
 
@@ -63,9 +68,12 @@ Los sensores miden, los cronometros muestran, la app calcula.
 - **Voltaje**: 5V
 - **Conexion**: WiFi directo al router + LoRa 433MHz
 - **Funcion**: traduce LoRa <-> HTTP
+- **Dual-core**: Core 1 = LoRa RX (interrupcion) + OLED, Core 0 = HTTP
+- **LoRa RX**: por interrupcion (onReceive), ring buffer de 8 paquetes — nunca pierde paquetes durante HTTP
+- **ACK**: envia ACK al sensor en cada cruce, deduplicacion por (src_id, seq)
 - **Polling**: cada 2s consulta comandos pendientes para sensor-a, sensor-b, semaforo
 - **HTTP timeout**: 5 segundos
-- **OLED muestra**: IP, LoRa RX/TX, HTTP OK/ER
+- **OLED muestra**: IP, RX/TX/ACK counts, HTTP OK/ER
 
 ### 2.7 POS Vizzion Q2i
 - Android con impresora termica 58mm integrada
@@ -85,7 +93,8 @@ Los sensores miden, los cronometros muestran, la app calcula.
 1. **Armar par**: tocar 2 tripulaciones -> Pista A (azul) + Pista B (naranja)
 2. **"Salieron a pista"**: marca ambas como en_pista
 3. **Corrida 1**:
-   - Tocar "Armar Largada" -> habilita sensores + semaforo
+   - Tocar "Armar Largada" -> habilita sensores (35s) + semaforo
+   - Contador "Sensor armado: XXs" aparece en pantalla
    - Semaforo hace secuencia 12s -> verde -> auto cruza sensor -> crono arranca
    - Tocar "Armar Llegada" -> habilita sensores
    - Auto cruza sensor -> crono para -> tiempo aparece en formulario
@@ -219,5 +228,6 @@ firmware/semaforo/semaforo.ino
 
 ### 10.5 Comunicacion
 - **Cronos**: WiFi -> long polling GET cada <=10s (respuesta inmediata cuando hay comando). Heartbeat dentro del mismo GET.
-- **Gateway**: WiFi -> polling GET cada 2s para sensor-a, sensor-b, semaforo. Heartbeat POST cada 5s.
-- **Sensores, semaforo**: LoRa 433MHz -> gateway. Heartbeat LoRa cada 5s.
+- **Gateway**: dual-core, WiFi -> polling GET cada 2s (Core 0), LoRa RX por interrupcion (Core 1). Heartbeat POST cada 5s. ACK a sensores en cruces.
+- **Sensores**: LoRa 433MHz -> gateway. Cruce con reintento (300ms x 10) hasta ACK. delta_ms en paquete. Heartbeat cada 5s.
+- **Semaforo**: LoRa 433MHz -> gateway. Heartbeat cada 5s. Secuencia por maquina de estados (sin delay).
