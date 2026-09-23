@@ -122,7 +122,7 @@ class CronometroController extends Controller
             'dispositivo_id' => $dispositivo->id,
             'tipo' => $data['tipo'],
             'tramo' => $data['tramo'] ?? $dispositivo->tramo,
-            'timestamp_servidor' => $timestampReal,
+            'timestamp_servidor' => $timestampReal->format('Y-m-d H:i:s.v'),
             'procesado' => false,
         ]);
 
