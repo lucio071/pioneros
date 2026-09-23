@@ -184,6 +184,7 @@ void cmdReset() {
   tiempo_inicio_ms = 0;
   tiempo_final_ms = 0;
   tiempo_mostrado_ms = 0;
+  sensor_armado_hasta = 0;
   if (xSemaphoreTake(mutex_estado, pdMS_TO_TICKS(50))) {
     tripulacion_actual = "---";
     vuelta_actual = 1;

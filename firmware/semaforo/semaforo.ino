@@ -1,7 +1,7 @@
 /*
  * PIONEROS 4x4 - SEMAFORO LoRa
  * Placa: LILYGO T3 V1.6.1
- * Secuencia largada: R1 3s → R1+R2 3s → R1+R2+R3 3s → VERDE 3s → OFF
+ * Secuencia largada: R1 3s → R1+R2 3s → R1+R2+R3 3s → VERDE 5s → OFF (14s total)
  *
  * Reles ACTIVE LOW (GPIO LOW = rele activo = LED encendido)
  * Comandos serie: l=largada, r=rojo, v=verde, o=off, s=estado
@@ -61,7 +61,7 @@ int last_rssi = 0;
 #define SEQ_R1_MS     3000
 #define SEQ_R2_MS     3000
 #define SEQ_R3_MS     3000
-#define SEQ_VERDE_MS  3000
+#define SEQ_VERDE_MS  5000
 
 enum SeqFase { SEQ_IDLE, SEQ_R1, SEQ_R1R2, SEQ_R1R2R3, SEQ_VERDE };
 SeqFase seq_fase = SEQ_IDLE;
