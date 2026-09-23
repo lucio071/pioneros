@@ -1,6 +1,9 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+
+// SPA: no hay named route 'login', devolver 401
+Route::get('/login', fn() => response()->json(['message' => 'Unauthenticated.'], 401))->name('login');
 use App\Http\Controllers\Api\V1\Public\FechaPublicController;
 use App\Http\Controllers\Api\V1\Public\CampeonatoPublicController;
 use App\Http\Controllers\Api\V1\Public\PatrocinadorPublicController;
@@ -113,6 +116,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::delete('/tripulaciones/{tripulacion}', [TripulacionController::class, 'destroy']);
     Route::post('/tripulaciones/{tripulacion}/salio-a-pista', [TripulacionController::class, 'salioAPista']);
     Route::post('/tripulaciones/{tripulacion}/confirmar-largo-tanda', [TripulacionController::class, 'confirmarLargoTanda']);
+    Route::post('/tripulaciones/{tripulacion}/reincorporar', [TripulacionController::class, 'reincorporar']);
     Route::post('/tripulaciones/{tripulacion}/abandonar', [TripulacionController::class, 'abandonar']);
     Route::put('/tripulaciones/{tripulacion}/puntos', [TripulacionController::class, 'asignarPuntos']);
 
@@ -149,7 +153,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/dispositivos/{codigo}/logs', [CronometroController::class, 'verLogs']);
 });
 
-// Sync pista → nube (autenticado con SYNC_SECRET)
-Route::post('/v1/sync/fecha', [SyncController::class, 'recibirFecha']);
+// Sync config: bajar fecha desde nube (autenticado con SYNC_SECRET)
 Route::get('/v1/sync/fecha/{fechaId}/export', [SyncController::class, 'exportarFecha']);
+Route::post('/v1/sync/fecha/{fechaId}/bajar', [SyncController::class, 'bajarFechaDesdeNube'])->middleware('auth:sanctum');
 
