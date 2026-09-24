@@ -398,6 +398,12 @@ async function autoReincorporar(trip: any): Promise<boolean> {
 
 async function armarLargada() {
   try {
+    // Verificar que el gateway esté online
+    const gw = dispositivos.value.find((d: any) => d.codigo === 'gateway')
+    if (!gw?.online) {
+      if (!confirm('GATEWAY OFFLINE — sin gateway no llegan comandos a sensores ni semáforo.\n\n¿Armar largada de todas formas?')) return
+    }
+
     // Auto-reincorporar si alguna trip está en DNF
     const tripsAChequear = selectedTripB.value
       ? [tripEnPistaA.value, tripEnPistaB.value]
