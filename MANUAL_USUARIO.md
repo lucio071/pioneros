@@ -334,7 +334,16 @@ La **pista doble** significa que hay dos pistas paralelas (A y B). En cada heat 
 22. Seleccionar el siguiente par
 23. Repetir el proceso
 
-### 5.2 Ingresar tiempo manual si el sensor no detecta
+### 5.2 Que hacer si un sensor no detecta el cruce
+
+Si el sensor no detecta el cruce de un auto (largada o llegada), hay dos opciones:
+
+**Opcion 1: Re-armar solo ese sensor (sin repetir semaforo)**
+En la fila de botones debajo de "Armar Largada", tocar **"Largada A"** o **"Largada B"** para re-habilitar solo el sensor de esa pista (35 segundos). No activa el semaforo. Util si un sensor no detecto pero el otro si.
+
+Tambien hay botones **"Reset A"** y **"Reset B"** para resetear un crono individual.
+
+**Opcion 2: Ingresar tiempo manual**
 
 Si el sensor no detecta el cruce de un auto (largada o llegada):
 
@@ -359,12 +368,13 @@ Si el sensor no detecta el cruce de un auto (largada o llegada):
 Si un auto no puede terminar una corrida por problemas mecanicos u otro motivo:
 
 1. En la pantalla de cronometraje, tocar **"#N abandona vuelta"** (boton rojo con el numero del auto)
-2. Confirmar — la vuelta completa (corrida 1 + 2) queda marcada como **NULA**
+2. Confirmar — la vuelta queda marcada como **NULA**
 3. El crono de esa pista se resetea
-4. El otro auto del par sigue corriendo normal
+4. **El otro auto del par sigue corriendo solo**: se habilita corrida 2 automaticamente, el compañero cambia de pista y corre normalmente. Su vuelta queda completa (tramo A + tramo B).
 5. La tripulacion que abandono **puede volver a correr en la vuelta siguiente**
 
 > Una vuelta nula no cuenta para el ranking. Si la tripulacion tiene otras vueltas validas, se usa la mejor.
+> Para clasificar, basta con tener **al menos 1 vuelta valida completa**. No importa si no corrio todas las vueltas.
 
 ### 5.4 DNF — cuando un auto no corre mas en la fecha
 
@@ -470,7 +480,10 @@ Una vez verificados todos los tiempos y puntos:
 
 1. Ir a la pestana **"Config"** de la fecha
 2. Tocar **"Finalizar fecha"** (boton rojo)
-3. Leer el mensaje de confirmacion
+3. Leer el mensaje de confirmacion — muestra:
+   - Cuantos clasificados hay (con al menos 1 vuelta valida)
+   - Lista de quienes quedan como **DNF** (abandonados o sin vueltas validas)
+   - Si alguno no deberia ser DNF, cancelar y reincorporarlo antes
 4. Confirmar
 
 Una vez finalizada, la fecha queda bloqueada. Solo el administrador puede modificar puntos.
