@@ -64,6 +64,7 @@ int last_rssi = 0;
 
 bool habilitado = false;
 uint32_t habilitado_hasta = 0;
+uint32_t next_hb_interval = HEARTBEAT_INTERVAL_MS;
 
 volatile bool cruce_pendiente = false;
 volatile uint32_t ultimo_cruce_isr_ms = 0;
@@ -148,6 +149,11 @@ void enviarLoRaRaw(uint8_t dst_id, uint8_t tipo, uint16_t seq, uint8_t* extra, s
   packet[payload_size] = crc & 0xFF;
   packet[payload_size + 1] = (crc >> 8) & 0xFF;
   payload_size += 2;
+  // CSMA: esperar si el canal esta ocupado
+  for (int csma = 0; csma < 5; csma++) {
+    if (LoRa.rssi() < -90) break;  // canal libre
+    delay(random(20, 60));
+  }
   LoRa.beginPacket();
   LoRa.write(packet, payload_size);
   LoRa.endPacket();
@@ -183,7 +189,7 @@ void iniciarCruce(uint32_t t_cruce) {
 
 void reintentarCruce() {
   if (!esperando_ack) return;
-  if (millis() - ultimo_reintento < CRUCE_RETRY_MS) return;
+  if (millis() - ultimo_reintento < (uint32_t)(CRUCE_RETRY_MS + random(0, 200))) return;
   if (reintentos >= CRUCE_MAX_RETRIES) {
     Serial.println("CRUCE: max reintentos, desistiendo");
     esperando_ack = false;
@@ -285,6 +291,7 @@ void procesarComandoSerial() {
 
 void setup() {
   Serial.begin(115200);
+  randomSeed(esp_random());
   pinMode(LED_PIN, OUTPUT);
   pinMode(SENSOR_PIN, INPUT);   // GPIO34 no tiene pull interno; lo fija la resistencia externa
   delay(1000);
@@ -305,8 +312,8 @@ void setup() {
     ESP.restart();
   }
   LoRa.setTxPower(14);
-  LoRa.setSpreadingFactor(9);
-  LoRa.setSignalBandwidth(125E3);
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSignalBandwidth(250E3);
   LoRa.setSyncWord(0x12);
   LoRa.receive();
   display.println("LoRa OK");
@@ -363,9 +370,10 @@ void loop() {
     updateDisplay();
   }
   procesarComandoSerial();
-  if (millis() - last_hb > HEARTBEAT_INTERVAL_MS) {
+  if (millis() - last_hb > next_hb_interval) {
     enviarHeartbeat();
     last_hb = millis();
+    next_hb_interval = HEARTBEAT_INTERVAL_MS + random(0, 2000);
     updateDisplay();
   }
 }

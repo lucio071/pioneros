@@ -52,6 +52,7 @@
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 uint16_t seq_tx = 0;
 uint32_t last_hb = 0;
+uint32_t next_hb_interval = HEARTBEAT_INTERVAL_MS;
 uint32_t largadas_count = 0;
 uint32_t ack_count = 0;
 int last_rssi = 0;
@@ -128,6 +129,11 @@ void enviarLoRa(uint8_t dst_id, uint8_t tipo, uint8_t* extra, size_t extra_len) 
   packet[payload_size + 1] = (crc >> 8) & 0xFF;
   payload_size += 2;
 
+  // CSMA: esperar si el canal esta ocupado
+  for (int csma = 0; csma < 5; csma++) {
+    if (LoRa.rssi() < -90) break;
+    delay(random(20, 60));
+  }
   LoRa.beginPacket();
   LoRa.write(packet, payload_size);
   LoRa.endPacket();
@@ -288,6 +294,7 @@ void procesarComandoSerial() {
 
 void setup() {
   Serial.begin(115200);
+  randomSeed(esp_random());
 
   // Reles OFF antes de todo
   pinMode(RELE_ROJO1, OUTPUT); digitalWrite(RELE_ROJO1, HIGH);
@@ -315,8 +322,8 @@ void setup() {
     ESP.restart();
   }
   LoRa.setTxPower(14);
-  LoRa.setSpreadingFactor(9);
-  LoRa.setSignalBandwidth(125E3);
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSignalBandwidth(250E3);
   LoRa.setSyncWord(0x12);
   LoRa.receive();
 
@@ -346,9 +353,10 @@ void loop() {
   procesarComandoSerial();
   actualizarSecuencia();
 
-  if (millis() - last_hb > HEARTBEAT_INTERVAL_MS) {
+  if (millis() - last_hb > next_hb_interval) {
     enviarHeartbeat();
     last_hb = millis();
+    next_hb_interval = HEARTBEAT_INTERVAL_MS + random(0, 2000);
     updateDisplay(secuencia_en_curso ? "SECUENCIA" : "ESPERA");
   }
 }

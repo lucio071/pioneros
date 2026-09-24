@@ -483,8 +483,8 @@ void setup() {
     ESP.restart();
   }
   LoRa.setTxPower(14);
-  LoRa.setSpreadingFactor(9);
-  LoRa.setSignalBandwidth(125E3);
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSignalBandwidth(250E3);
   LoRa.setSyncWord(0x12);
 
   // RX por interrupcion — nunca se pierde un paquete

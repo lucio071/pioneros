@@ -28,9 +28,9 @@
 
 // ================== CONSTANTES ==================
 #define API_URL    "http://192.168.100.5"
-#define LONG_POLL_WAIT_S       10     // el servidor retiene el GET hasta 10 s
+#define LONG_POLL_WAIT_S       3     // el servidor retiene el GET hasta 3 s
 #define HTTP_TIMEOUT_MS        (LONG_POLL_WAIT_S * 1000 + 3000)
-#define POLL_RETRY_MS          500    // espera entre polls solo si hubo error
+#define POLL_RETRY_MS          50     // reintento rapido tras error
 #define STATUS_INTERVAL_MS     5000
 
 // ================== DISPLAY ==================
@@ -284,6 +284,9 @@ bool consultarComandos() {
 void tareaHTTP(void* param) {
   uint32_t last_status = 0;
   uint32_t last_ok_ms = millis();  // ultimo HTTP 200 exitoso
+  uint32_t last_ratio_check = millis();
+  uint32_t ratio_ok_start = 0;
+  uint32_t ratio_err_start = 0;
 
   for (;;) {
     wifi_connected = (WiFi.status() == WL_CONNECTED);
@@ -309,6 +312,19 @@ void tareaHTTP(void* param) {
       if (sin_respuesta > 180000) {
         Serial.println("[WATCHDOG] 3 min sin respuesta, reiniciando...");
         ESP.restart();
+      }
+
+      // Watchdog por ratio: en 5 min si ER > OK → reiniciar
+      if (millis() - last_ratio_check > 300000) {
+        uint32_t period_ok = http_ok - ratio_ok_start;
+        uint32_t period_err = http_err - ratio_err_start;
+        if (period_err > period_ok && period_err > 5) {
+          Serial.printf("[WATCHDOG] ratio ER(%lu) > OK(%lu) en 5min, reiniciando...\n", period_err, period_ok);
+          ESP.restart();
+        }
+        ratio_ok_start = http_ok;
+        ratio_err_start = http_err;
+        last_ratio_check = millis();
       }
 
       if (millis() - last_status > STATUS_INTERVAL_MS) {
@@ -360,7 +376,7 @@ void setup() {
 
   display = new MatrixPanel_I2S_DMA(mxconfig);
   display->begin();
-  display->setBrightness8(100);
+  display->setBrightness8(80);
   display->clearScreen();
 
   canvas = new GFXcanvas16(LOGIC_W, LOGIC_H);
@@ -369,7 +385,8 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.printf("WiFi conectando a %s...\n", WIFI_SSID);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  Serial.printf("WiFi conectando a %s (TX 19.5dBm)...\n", WIFI_SSID);
 
   // OTA
   ArduinoOTA.setHostname(OTA_HOST);
