@@ -3,7 +3,7 @@
  * Placa: LILYGO T3 V1.6.1
  * DUAL-CORE: Core 1 = LoRa RX (interrupcion) + OLED, Core 0 = HTTP
  *
- * LoRa RX por interrupcion (onReceive) — nunca se pierde un paquete
+ * LoRa RX por polling en loop (HTTP en Core 0, loop libre para LoRa)
  * durante HTTP. Ring buffer de 8 paquetes. ACK para cruces.
  * HTTP en Core 0: polls, eventos, heartbeat.
  */
@@ -17,6 +17,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
+#include <esp_system.h>
 
 // ================== CONFIGURACION ==================
 #include "config.h"   // WIFI_SSID, WIFI_PASS, GW_TOKEN, TOKEN_SENSOR_A/B, TOKEN_SEMAFORO
@@ -50,17 +51,7 @@
 #define CMD_RESET              0x12
 #define EV_ACK                 0xF0
 
-// ================== RING BUFFER LoRa RX ==================
-#define RX_BUF_SIZE  8
-struct RxPacket {
-  uint8_t data[20];
-  uint8_t len;
-  int rssi;
-};
-RxPacket rx_buf[RX_BUF_SIZE];
-volatile uint8_t rx_head = 0;
-volatile uint8_t rx_tail = 0;
-volatile uint32_t rx_dropped = 0;
+// Ring buffer eliminado: RX por polling, no por ISR
 
 // ================== COLA HTTP (LoRa -> HTTP) ==================
 #define HTTP_Q_SIZE  8
@@ -100,6 +91,7 @@ uint32_t http_ok = 0;
 uint32_t http_err = 0;
 uint32_t ack_sent = 0;
 int last_rssi = 0;
+int reset_reason = 0;
 bool wifi_connected = false;
 
 // Deduplicacion: ultimo seq por src_id
@@ -141,10 +133,8 @@ void updateDisplay() {
   display.print(" Up:");
   display.print(millis() / 1000);
   display.println("s");
-  if (rx_dropped > 0) {
-    display.print("DROP:");
-    display.println(rx_dropped);
-  }
+  display.print("RST:");
+  display.println(reset_reason);
   display.display();
 }
 
@@ -171,6 +161,11 @@ void enviarComandoLoRa(uint8_t dst_id, uint8_t tipo, uint8_t* extra, size_t extr
   packet[payload_size + 1] = (crc >> 8) & 0xFF;
   payload_size += 2;
 
+  // CSMA: esperar si el canal esta ocupado
+  for (int csma = 0; csma < 5; csma++) {
+    if (LoRa.rssi() < -90) break;
+    delay(random(20, 60));
+  }
   LoRa.beginPacket();
   LoRa.write(packet, payload_size);
   LoRa.endPacket();
@@ -186,27 +181,7 @@ void enviarACK(uint8_t dst_id, uint16_t seq_original) {
   ack_sent++;
 }
 
-// ================== LoRa RX CALLBACK (interrupcion) ==================
-void onLoRaReceive(int packetSize) {
-  if (packetSize <= 0 || packetSize > 20) return;
-
-  uint8_t next = (rx_head + 1) % RX_BUF_SIZE;
-  if (next == rx_tail) {
-    // Buffer lleno, descartar
-    rx_dropped++;
-    // Leer y tirar para limpiar el radio
-    while (LoRa.available()) LoRa.read();
-    return;
-  }
-
-  RxPacket* p = &rx_buf[rx_head];
-  p->len = 0;
-  while (LoRa.available() && p->len < 20) {
-    p->data[p->len++] = LoRa.read();
-  }
-  p->rssi = LoRa.packetRssi();
-  rx_head = next;
-}
+// onLoRaReceive eliminado: polling en loop, sin race con TX
 
 // ================== PROCESAR PAQUETE (Core 1) ==================
 void procesarPaquete(uint8_t* pkt, size_t len, int rssi) {
@@ -326,66 +301,80 @@ bool enviarHeartbeatApp(const char* token, int rssi, int voltaje_mv, uint32_t up
 
 void consultarComandos(const char* token, uint8_t dst_id) {
   if (!wifi_connected) return;
-  HTTPClient http;
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.begin(String(API_URL) + "/api/v1/cronometro/comandos-pendientes");
-  http.addHeader("Authorization", String("Bearer ") + token);
-  int code = http.GET();
 
-  if (code == 200) {
-    String body = http.getString();
-    StaticJsonDocument<2048> doc;
-    if (deserializeJson(doc, body) == DeserializationError::Ok) {
-      JsonArray comandos = doc["comandos"].as<JsonArray>();
-      for (JsonObject cmd : comandos) {
-        const char* tipo = cmd["tipo"];
-        const char* cmd_id = cmd["id"];
-        if (!tipo || !cmd_id) continue;
+  // Fase 1: GET comandos y recolectar IDs a confirmar
+  char ids_confirmar[4][40];
+  uint8_t n_confirmar = 0;
 
-        // Encolar TX LoRa
-        bool encolado = false;
-        uint8_t next = (tq_head + 1) % TX_Q_SIZE;
-        if (next != tq_tail) {
-          TxCmd* tc = &tx_q[tq_head];
-          tc->dst_id = dst_id;
-          tc->extra_len = 0;
-          tc->retries = 1;
+  {
+    HTTPClient http;
+    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.begin(String(API_URL) + "/api/v1/cronometro/comandos-pendientes");
+    http.addHeader("Authorization", String("Bearer ") + token);
+    int code = http.GET();
 
-          if (strcmp(tipo, "habilitar_sensor") == 0) {
-            tc->tipo = CMD_HABILITAR_SENSOR;
-            uint16_t dur = cmd["payload"]["duracion_seg"] | 35;
-            memcpy(tc->extra, &dur, 2);
-            tc->extra_len = 2;
-            tc->retries = 3;
-          } else if (strcmp(tipo, "semaforo_largada") == 0) {
-            tc->tipo = CMD_SEMAFORO_LARGADA;
-            tc->retries = 3;
-          } else if (strcmp(tipo, "reset") == 0) {
-            tc->tipo = CMD_RESET;
-          } else {
-            continue;  // tipo desconocido, no encolar ni confirmar
+    if (code == 200) {
+      String body = http.getString();
+      http.end();  // cerrar ANTES de parsear y confirmar
+
+      static StaticJsonDocument<2048> doc;  // static: vive en .bss, no en stack
+      if (deserializeJson(doc, body) == DeserializationError::Ok) {
+        JsonArray comandos = doc["comandos"].as<JsonArray>();
+        for (JsonObject cmd : comandos) {
+          const char* tipo = cmd["tipo"];
+          const char* cmd_id = cmd["id"];
+          if (!tipo || !cmd_id) continue;
+
+          // Encolar TX LoRa
+          uint8_t next = (tq_head + 1) % TX_Q_SIZE;
+          if (next != tq_tail) {
+            TxCmd* tc = &tx_q[tq_head];
+            tc->dst_id = dst_id;
+            tc->extra_len = 0;
+            tc->retries = 1;
+
+            if (strcmp(tipo, "habilitar_sensor") == 0) {
+              tc->tipo = CMD_HABILITAR_SENSOR;
+              uint16_t dur = cmd["payload"]["duracion_seg"] | 35;
+              memcpy(tc->extra, &dur, 2);
+              tc->extra_len = 2;
+              tc->retries = 3;
+            } else if (strcmp(tipo, "semaforo_largada") == 0) {
+              tc->tipo = CMD_SEMAFORO_LARGADA;
+              tc->retries = 3;
+            } else if (strcmp(tipo, "reset") == 0) {
+              tc->tipo = CMD_RESET;
+            } else {
+              continue;
+            }
+            tq_head = next;
+
+            // Guardar ID para confirmar despues
+            if (n_confirmar < 4) {
+              strncpy(ids_confirmar[n_confirmar], cmd_id, 39);
+              ids_confirmar[n_confirmar][39] = '\0';
+              n_confirmar++;
+            }
           }
-          tq_head = next;
-          encolado = true;
-        }
-
-        // Confirmar solo si se encolo
-        if (encolado) {
-          HTTPClient http2;
-          http2.setTimeout(HTTP_TIMEOUT_MS);
-          http2.begin(String(API_URL) + "/api/v1/cronometro/comandos/" + cmd_id + "/confirmar");
-          http2.addHeader("Authorization", String("Bearer ") + token);
-          int rc = http2.POST("");
-          http2.end();
-          if (rc >= 200 && rc < 300) http_ok++;
-          else http_err++;
         }
       }
+    } else {
+      http.end();
+      if (code > 0) http_err++;
     }
-  } else if (code > 0) {
-    http_err++;
+  } // HTTPClient http se destruye aqui
+
+  // Fase 2: confirmar comandos encolados (sin HTTPClient anidado)
+  for (uint8_t i = 0; i < n_confirmar; i++) {
+    HTTPClient http;
+    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.begin(String(API_URL) + "/api/v1/cronometro/comandos/" + ids_confirmar[i] + "/confirmar");
+    http.addHeader("Authorization", String("Bearer ") + token);
+    int rc = http.POST("");
+    http.end();
+    if (rc >= 200 && rc < 300) http_ok++;
+    else http_err++;
   }
-  http.end();
 }
 
 // ================== TAREA HTTP (Core 0) ==================
@@ -459,11 +448,14 @@ void tareaHTTP(void* param) {
 // ================== SETUP ==================
 void setup() {
   Serial.begin(115200);
+  randomSeed(esp_random());
   pinMode(LED_PIN, OUTPUT);
   delay(1000);
 
+  reset_reason = (int)esp_reset_reason();
   Serial.println("=====================================");
-  Serial.println("GATEWAY dual-core init");
+  Serial.printf("GATEWAY dual-core init (RST:%d)\n", reset_reason);
+  // 1=POWERON 3=SW 4=INT_WDT 5=TASK_WDT 6=WDT 8=BROWNOUT
   Serial.println("=====================================");
 
   Wire.begin(21, 22);
@@ -473,7 +465,14 @@ void setup() {
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.println("GATEWAY init");
+  display.printf("RST: %d", reset_reason);
+  if (reset_reason == 8) display.print(" BROWNOUT!");
+  else if (reset_reason == 5) display.print(" TASK_WDT!");
+  else if (reset_reason == 1) display.print(" POWERON");
+  else if (reset_reason == 3) display.print(" SW");
+  display.println();
   display.display();
+  delay(3000);  // mostrar reset reason 3 segundos
 
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
   LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
@@ -487,11 +486,10 @@ void setup() {
   LoRa.setSignalBandwidth(250E3);
   LoRa.setSyncWord(0x12);
 
-  // RX por interrupcion — nunca se pierde un paquete
-  LoRa.onReceive(onLoRaReceive);
+  // RX por polling en loop (HTTP en Core 0, loop libre para LoRa)
   LoRa.receive();
 
-  display.println("LoRa OK (IRQ)");
+  display.println("LoRa OK");
   display.display();
 
   // WiFi — no bloqueante
@@ -513,7 +511,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     tareaHTTP,
     "http",
-    8192,
+    16384,
     NULL,
     1,
     NULL,
@@ -526,11 +524,15 @@ void setup() {
 
 // ================== LOOP (Core 1 — LoRa + OLED) ==================
 void loop() {
-  // 1. Procesar ring buffer de paquetes RX
-  while (rx_tail != rx_head) {
-    RxPacket pkt = rx_buf[rx_tail];
-    rx_tail = (rx_tail + 1) % RX_BUF_SIZE;
-    procesarPaquete(pkt.data, pkt.len, pkt.rssi);
+  // 1. LoRa RX por polling (sin ISR, sin race con TX)
+  int packetSize = LoRa.parsePacket();
+  if (packetSize > 0 && packetSize <= 20) {
+    uint8_t pkt[20];
+    int i = 0;
+    while (LoRa.available() && i < 20) pkt[i++] = LoRa.read();
+    int rssi = LoRa.packetRssi();
+    procesarPaquete(pkt, i, rssi);
+    LoRa.receive();
   }
 
   // 2. Procesar cola TX LoRa (comandos del servidor)

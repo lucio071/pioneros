@@ -23,7 +23,7 @@
 #define LORA_CS    18
 #define LORA_RST   23
 #define LORA_DIO0  26
-#define LED_PIN    25
+// LED_PIN removido: GPIO 25 es RELE_VERDE
 
 // Reles (ACTIVE LOW)
 #define RELE_ROJO1  13
