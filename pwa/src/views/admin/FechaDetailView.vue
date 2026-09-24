@@ -236,18 +236,22 @@ async function guardarCorrida() {
   if (bodyPistaB && msB > 0) bodyPistaB.tiempo_ms = msB
 
   try {
+    // No guardar tramo de trip con vuelta nula (abandonó)
+    const tripANula = tripA.vueltas?.some((v: any) => v.numero_vuelta === selectedVuelta.value && v.nula)
+    const tripBNula = tripB?.vueltas?.some((v: any) => v.numero_vuelta === selectedVuelta.value && v.nula)
+
     if (corridaActual.value === 1) {
       // Corrida 1: tripA corre pistaA (su tramo A), tripB corre pistaB (su tramo B)
-      await apiMutate('PUT', `/tripulaciones/${tripA.id}/vueltas/${selectedVuelta.value}/tramos/A`, bodyPistaA)
-      if (tripB && bodyPistaB) {
+      if (!tripANula) await apiMutate('PUT', `/tripulaciones/${tripA.id}/vueltas/${selectedVuelta.value}/tramos/A`, bodyPistaA)
+      if (tripB && bodyPistaB && !tripBNula) {
         await apiMutate('PUT', `/tripulaciones/${tripB.id}/vueltas/${selectedVuelta.value}/tramos/B`, bodyPistaB)
       }
     } else {
       // Corrida 2: tripB corre pistaA (su tramo A), tripA corre pistaB (su tramo B)
-      if (tripB && bodyPistaA) {
+      if (tripB && bodyPistaA && !tripBNula) {
         await apiMutate('PUT', `/tripulaciones/${tripB.id}/vueltas/${selectedVuelta.value}/tramos/A`, bodyPistaA)
       }
-      await apiMutate('PUT', `/tripulaciones/${tripA.id}/vueltas/${selectedVuelta.value}/tramos/B`, bodyPistaB || bodyPistaA)
+      if (!tripANula) await apiMutate('PUT', `/tripulaciones/${tripA.id}/vueltas/${selectedVuelta.value}/tramos/B`, bodyPistaB || bodyPistaA)
     }
 
     if (navigator.vibrate) navigator.vibrate([50, 50, 50])
@@ -430,6 +434,27 @@ async function armarLargada() {
     showToast('Largada armada: sensores + semaforo')
   } catch (e: any) {
     showToast(e.message || 'Error al armar largada', 'error')
+  }
+}
+
+async function reArmarSensor(pista: 'A' | 'B') {
+  try {
+    const sensor = pista === 'A' ? 'sensor-a' : 'sensor-b'
+    await apiMutate('POST', `/cronometro/${sensor}/comando`, { tipo: 'habilitar_sensor', payload: { duracion_seg: 35 } })
+    sensorArmadoHasta.value = Date.now() + 35000
+    showToast(`Sensor ${pista} re-armado (35s)`)
+  } catch (e: any) {
+    showToast(e.message || 'Error', 'error')
+  }
+}
+
+async function resetPista(pista: 'A' | 'B') {
+  try {
+    const crono = pista === 'A' ? 'crono-a' : 'crono-b'
+    await apiMutate('POST', `/cronometro/${crono}/comando`, { tipo: 'reset' })
+    showToast(`Reset pista ${pista}`)
+  } catch (e: any) {
+    showToast(e.message || 'Error', 'error')
   }
 }
 
@@ -754,6 +779,12 @@ async function abandonarVuelta(trip: any) {
     if (selectedTripB.value) {
       selectedTripB.value = tripulaciones.value.find((t: any) => t.id === selectedTripB.value?.id) || selectedTripB.value
     }
+
+    // Si estamos en corrida 1 y el compañero sigue, habilitar corrida 2
+    if (corridaActual.value === 1 && selectedTripB.value) {
+      corrida1Guardada.value = true
+      largadaEnCurso.value = false
+    }
   } catch (e: any) {
     showToast(e.message || 'Error', 'error')
   }
@@ -922,19 +953,21 @@ async function finalizarFecha() {
   const cats = fechaCategorias.value.length
   const trips = tripulaciones.value.length
   const dnfTrips = tripulaciones.value.filter((t: any) => t.estado === 'abandonado')
-  const dnfList = dnfTrips.map((t: any) => `#${t.numero} ${t.nombre}`).join('\n')
+  const sinVueltas = tripulaciones.value.filter((t: any) =>
+    t.estado !== 'abandonado' && (!t.vueltas?.length || t.vueltas.every((v: any) => v.nula)))
+  const dnfAll = [...dnfTrips, ...sinVueltas]
+  const dnfList = dnfAll.map((t: any) => `  #${t.numero} ${t.nombre} (${t.estado === 'abandonado' ? 'abandonado' : 'sin vueltas'})`).join('\n')
+  const clasificados = tripulaciones.value.filter((t: any) =>
+    t.estado !== 'abandonado' && t.vueltas?.some((v: any) => !v.nula && v.tramos?.length >= 2))
   const msg = `FINALIZAR FECHA
 
 Una vez finalizada NO se puede:
 - Modificar tiempos ni penalizaciones
 - Inscribir o eliminar tripulaciones
-- Cambiar configuracion
-
-Solo el administrador podra modificar puntos.
 
 Categorias: ${cats}
-Tripulaciones: ${trips}
-${dnfTrips.length ? `\nDNF (1 punto):\n${dnfList}\n` : ''}
+Clasificados: ${clasificados.length}
+${dnfAll.length ? `\nDNF (1 punto):\n${dnfList}\n\nSi alguno no deberia ser DNF, cancela y reincorpora antes.\n` : ''}
 Estas seguro?`
   if (!confirm(msg)) return
   await apiMutate('POST', `/fechas/${route.params.id}/finalizar`)
@@ -1383,6 +1416,12 @@ if (typeof window !== 'undefined') {
                   class="bg-gray-200 hover:bg-gray-300 text-gray-600 text-xs font-bold py-2.5 rounded-lg transition-colors">
                   RESET
                 </button>
+              </div>
+              <div v-if="selectedTripB" class="grid grid-cols-4 gap-1 mt-1">
+                <button @click="reArmarSensor('A')" class="bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-medium py-1.5 rounded">Largada A</button>
+                <button @click="reArmarSensor('B')" class="bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-medium py-1.5 rounded">Largada B</button>
+                <button @click="resetPista('A')" class="bg-gray-100 hover:bg-gray-200 text-gray-500 text-[10px] font-medium py-1.5 rounded">Reset A</button>
+                <button @click="resetPista('B')" class="bg-gray-100 hover:bg-gray-200 text-gray-500 text-[10px] font-medium py-1.5 rounded">Reset B</button>
               </div>
             </div>
 
