@@ -80,6 +80,7 @@ SemaphoreHandle_t mutex_estado = NULL;
 TaskHandle_t http_task = NULL;
 volatile bool ota_en_curso = false;
 volatile uint32_t sensor_armado_hasta = 0;
+volatile bool sin_conexion = false;
 int reset_reason = 0;
 
 // ================== MAPPING PANEL ==================
@@ -160,6 +161,12 @@ void renderDisplay() {
   if (sensor_armado_hasta > millis() && (millis() / 300) % 2 == 0) {
     uint16_t amarillo = display->color565(255, 200, 0);
     canvas->fillRect(76, 18, 2, 2, amarillo);
+  }
+
+  // Punto rojo fijo si sin conexion al servidor
+  if (sin_conexion) {
+    uint16_t rojo = display->color565(255, 0, 0);
+    canvas->fillRect(0, 18, 2, 2, rojo);
   }
 
   flushCanvas();
@@ -286,10 +293,7 @@ bool consultarComandos() {
 // ================== TAREA HTTP (Core 0) ==================
 void tareaHTTP(void* param) {
   uint32_t last_status = 0;
-  uint32_t last_ok_ms = millis();  // ultimo HTTP 200 exitoso
-  uint32_t last_ratio_check = millis();
-  uint32_t ratio_ok_start = 0;
-  uint32_t ratio_err_start = 0;
+  uint32_t last_ok_ms = millis();
 
   for (;;) {
     wifi_connected = (WiFi.status() == WL_CONNECTED);
@@ -298,43 +302,29 @@ void tareaHTTP(void* param) {
       bool ok = consultarComandos();
       if (ok) {
         last_ok_ms = millis();
+        sin_conexion = false;
       } else {
         vTaskDelay(pdMS_TO_TICKS(POLL_RETRY_MS));
       }
 
-      // Watchdog de red: sin 200 en 60s → reconectar WiFi
+      // Sin respuesta 30s → reconectar WiFi + indicador
       uint32_t sin_respuesta = millis() - last_ok_ms;
       if (sin_respuesta > 30000) {
-        Serial.println("[WATCHDOG] 30s sin respuesta, reconectando WiFi...");
+        sin_conexion = true;
+        Serial.println("[NET] 30s sin respuesta, reconectando WiFi...");
         WiFi.disconnect(false, false);
         vTaskDelay(pdMS_TO_TICKS(1000));
         WiFi.begin(WIFI_SSID, WIFI_PASS);
-        last_ok_ms = millis(); // reset para dar tiempo
-      }
-      // Sin 200 en 3 min → reiniciar ESP
-      if (sin_respuesta > 180000) {
-        Serial.println("[WATCHDOG] 3 min sin respuesta, reiniciando...");
-        ESP.restart();
-      }
-
-      // Watchdog por ratio: en 5 min si ER > OK → reiniciar
-      if (millis() - last_ratio_check > 300000) {
-        uint32_t period_ok = http_ok - ratio_ok_start;
-        uint32_t period_err = http_err - ratio_err_start;
-        if (period_err > period_ok && period_err > 5) {
-          Serial.printf("[WATCHDOG] ratio ER(%lu) > OK(%lu) en 5min, reiniciando...\n", period_err, period_ok);
-          ESP.restart();
-        }
-        ratio_ok_start = http_ok;
-        ratio_err_start = http_err;
-        last_ratio_check = millis();
+        last_ok_ms = millis();
       }
 
       if (millis() - last_status > STATUS_INTERVAL_MS) {
         last_status = millis();
-        Serial.printf("[STATUS] WiFi=OK HTTP OK=%u ER=%u | Estado=%d | sinResp=%lus\n", http_ok, http_err, estado, sin_respuesta/1000);
+        Serial.printf("[STATUS] WiFi=OK HTTP OK=%u ER=%u | Estado=%d | sinResp=%lus%s\n",
+          http_ok, http_err, estado, sin_respuesta/1000, sin_conexion ? " [SIN RED]" : "");
       }
     } else {
+      sin_conexion = true;
       static uint32_t last_reconnect = 0;
       wl_status_t st = WiFi.status();
       if (st != WL_IDLE_STATUS && millis() - last_reconnect > 15000) {
@@ -342,11 +332,6 @@ void tareaHTTP(void* param) {
         WiFi.disconnect(false, false);
         WiFi.begin(WIFI_SSID, WIFI_PASS);
         last_reconnect = millis();
-      }
-      // Si lleva mucho sin WiFi, reiniciar
-      if (millis() - last_ok_ms > 180000) {
-        Serial.println("[WATCHDOG] 3 min sin WiFi, reiniciando...");
-        ESP.restart();
       }
     }
 
