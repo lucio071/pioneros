@@ -306,9 +306,9 @@ void tareaHTTP(void* param) {
       uint32_t sin_respuesta = millis() - last_ok_ms;
       if (sin_respuesta > 30000) {
         Serial.println("[WATCHDOG] 30s sin respuesta, reconectando WiFi...");
-        WiFi.disconnect();
+        WiFi.disconnect(false, false);
         vTaskDelay(pdMS_TO_TICKS(1000));
-        WiFi.reconnect();
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
         last_ok_ms = millis(); // reset para dar tiempo
       }
       // Sin 200 en 3 min → reiniciar ESP
@@ -336,9 +336,11 @@ void tareaHTTP(void* param) {
       }
     } else {
       static uint32_t last_reconnect = 0;
-      if (millis() - last_reconnect > 5000) {
-        Serial.println("[WiFi] reconectando...");
-        WiFi.reconnect();
+      wl_status_t st = WiFi.status();
+      if (st != WL_IDLE_STATUS && millis() - last_reconnect > 15000) {
+        Serial.printf("[WiFi] estado=%d, reintentando\n", (int)st);
+        WiFi.disconnect(false, false);
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
         last_reconnect = millis();
       }
       // Si lleva mucho sin WiFi, reiniciar
@@ -388,6 +390,7 @@ void setup() {
   // WiFi — no bloqueante
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
   Serial.printf("WiFi conectando a %s (TX 19.5dBm)...\n", WIFI_SSID);

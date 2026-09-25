@@ -434,9 +434,12 @@ void tareaHTTP(void* param) {
       }
     } else {
       static uint32_t last_reconnect = 0;
-      if (millis() - last_reconnect > 5000) {
-        Serial.println("[WiFi] reconectando...");
-        WiFi.reconnect();
+      wl_status_t st = WiFi.status();
+      // WL_IDLE_STATUS = intento en curso: NO interrumpirlo
+      if (st != WL_IDLE_STATUS && millis() - last_reconnect > 15000) {
+        Serial.printf("[WiFi] estado=%d, reintentando\n", (int)st);
+        WiFi.disconnect(false, false);
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
         last_reconnect = millis();
       }
     }
@@ -495,6 +498,7 @@ void setup() {
   // WiFi — no bloqueante
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.printf("WiFi conectando a %s...\n", WIFI_SSID);
 
