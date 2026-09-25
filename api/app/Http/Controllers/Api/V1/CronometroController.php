@@ -24,6 +24,7 @@ class CronometroController extends Controller
             $request->input('rssi'),
             $request->input('voltaje_mv'),
             $request->input('uptime_sec'),
+            $request->input('reset_reason'),
         );
 
         return response()->json([

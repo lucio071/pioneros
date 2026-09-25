@@ -432,6 +432,7 @@ void tareaHTTP(void* param) {
         doc["rssi"] = WiFi.RSSI();
         doc["voltaje_mv"] = 5000;
         doc["uptime_sec"] = millis() / 1000;
+        doc["reset_reason"] = reset_reason;
         String body;
         serializeJson(doc, body);
         http.POST(body);

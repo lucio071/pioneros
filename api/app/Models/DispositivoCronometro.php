@@ -42,12 +42,13 @@ class DispositivoCronometro extends Model
         });
     }
 
-    public function registrarHeartbeat(?int $rssi, ?int $voltajeMv, ?int $uptimeSec): void
+    public function registrarHeartbeat(?int $rssi, ?int $voltajeMv, ?int $uptimeSec, ?int $resetReason = null): void
     {
         $data = ['ultimo_visto_at' => now()];
         if ($rssi !== null) $data['ultimo_rssi'] = $rssi;
         if ($voltajeMv !== null) $data['ultimo_voltaje_mv'] = $voltajeMv;
         if ($uptimeSec !== null) $data['ultimo_uptime_sec'] = $uptimeSec;
+        if ($resetReason !== null) $data['ultimo_reset_reason'] = $resetReason;
         $this->update($data);
     }
 }

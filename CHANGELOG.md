@@ -1,5 +1,43 @@
 # CHANGELOG — Sistema de Cronometraje Pioneros 4x4
 
+## 2026-09-24
+
+### Gateway estabilidad
+- Fix stack overflow en tarea HTTP: 8KB -> 16KB, HTTPClient no anidados, JSON static
+- Fix ISR/TX race: onReceive eliminado, volver a parsePacket en loop (HTTP en Core 0)
+- Fix WiFi reconnect: no interrumpir intento en curso, AutoReconnect, 15s entre intentos
+- TX no bloqueante: maquina de estados, una transmision por pasada del loop
+- CSMA reducido: 2 intentos, delay 5-15ms (SF7 paquete ~10ms)
+- TX_Q_SIZE 8 -> 16
+- Reset reason en serial + OLED + heartbeat
+
+### Cronos
+- Fix WiFi reconnect (mismo bug que gateway)
+- WiFi.setAutoReconnect(true)
+- reset_reason enviado al server via long poll query params
+- Brillo panel 100 -> 80 (reduce ruido HUB75 en WiFi)
+
+### LoRa anti-colision (sensores + semaforo)
+- SF9/BW125k -> SF7/BW250k (paquetes 5x mas cortos)
+- Heartbeat con jitter +random(0,2000)ms
+- Reintento de cruce con jitter +random(0,200)ms
+- CSMA con LoRa.rssi() (no packetRssi)
+- randomSeed(esp_random())
+
+### Backend
+- Timestamps con precision ms (timestamp(3))
+- reset_reason en heartbeat POST y query params
+- Columna ultimo_reset_reason en dispositivos
+- Panel muestra R:N cuando no es POWERON normal
+
+### App
+- Ranking: clasificar con >=1 vuelta valida (no requiere todas)
+- Par roto por abandono: companero corre solo corrida 2
+- Re-armar largada A/B sin semaforo + Reset A/B
+- Finalizar: lista de DNF + clasificados para confirmar
+- Advertencia gateway offline antes de armar largada
+- Polling dispositivos 3s -> 1.5s
+
 ## 2026-09-23
 
 ### 1. Precision timestamps (e0b53dd, dc9e84c)
