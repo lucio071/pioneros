@@ -366,7 +366,7 @@ async function fetchCronoEstado() {
 }
 function startCronoPolling() {
   fetchCronoEstado()
-  if (!cronoTimer) cronoTimer = setInterval(fetchCronoEstado, 3000)
+  if (!cronoTimer) cronoTimer = setInterval(fetchCronoEstado, 1500)
 }
 
 function stopCronoPolling() {
@@ -1406,6 +1406,7 @@ if (typeof window !== 'undefined') {
                   <span :class="['w-2 h-2 rounded-full', d.online ? 'bg-green-500' : 'bg-red-400']"></span>
                   <span class="text-[10px] text-gray-600">{{ d.codigo }}</span>
                   <span v-if="d.online && d.ultimo_rssi" class="text-[9px] text-gray-400">{{ d.ultimo_rssi }}</span>
+                  <span v-if="d.ultimo_reset_reason && d.ultimo_reset_reason !== 1" class="text-[9px] text-red-400" :title="'1=PWR 3=SW 5=WDT 8=BROWN'">R:{{ d.ultimo_reset_reason }}</span>
                 </div>
               </div>
               <div class="grid grid-cols-3 gap-2">

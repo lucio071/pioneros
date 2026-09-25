@@ -25,6 +25,7 @@
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 #include <esp_task_wdt.h>
+#include <esp_system.h>
 
 // ================== CONSTANTES ==================
 #define API_URL    "http://192.168.100.5"
@@ -79,6 +80,7 @@ SemaphoreHandle_t mutex_estado = NULL;
 TaskHandle_t http_task = NULL;
 volatile bool ota_en_curso = false;
 volatile uint32_t sensor_armado_hasta = 0;
+int reset_reason = 0;
 
 // ================== MAPPING PANEL ==================
 void drawLogicPixel(int x, int y, uint16_t color) {
@@ -234,7 +236,8 @@ bool consultarComandos() {
              + "?wait=" + LONG_POLL_WAIT_S
              + "&rssi=" + (int) WiFi.RSSI()
              + "&voltaje_mv=5000"
-             + "&uptime_sec=" + (millis() / 1000);
+             + "&uptime_sec=" + (millis() / 1000)
+             + "&reset_reason=" + reset_reason;
   http.begin(url);
   http.addHeader("Authorization", String("Bearer ") + API_TOKEN);
   int code = http.GET();
@@ -354,8 +357,9 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
+  reset_reason = (int)esp_reset_reason();
   Serial.println("=====================================");
-  Serial.printf("%s iniciando (dual-core)\n", CODIGO);
+  Serial.printf("%s iniciando (dual-core) RST:%d\n", CODIGO, reset_reason);
   Serial.println("=====================================");
 
   mutex_estado = xSemaphoreCreateMutex();

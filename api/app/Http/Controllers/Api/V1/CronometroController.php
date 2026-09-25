@@ -39,12 +39,16 @@ class CronometroController extends Controller
 
         // Heartbeat via query params (cronos mandan datos en el mismo GET)
         if ($request->has('rssi')) {
-            $dispositivo->update([
+            $data = [
                 'ultimo_visto_at' => now(),
                 'ultimo_rssi' => (int) $request->query('rssi', 0),
                 'ultimo_voltaje_mv' => (int) $request->query('voltaje_mv', 0),
                 'ultimo_uptime_sec' => (int) $request->query('uptime_sec', 0),
-            ]);
+            ];
+            if ($request->has('reset_reason')) {
+                $data['ultimo_reset_reason'] = (int) $request->query('reset_reason', 0);
+            }
+            $dispositivo->update($data);
         }
 
         // Long polling: wait=N seconds (max 10)
