@@ -31,7 +31,8 @@
 #define API_URL    "http://192.168.100.5"
 #define LONG_POLL_WAIT_S       3     // el servidor retiene el GET hasta 3 s
 #define HTTP_TIMEOUT_MS        (LONG_POLL_WAIT_S * 1000 + 3000)
-#define POLL_RETRY_MS          50     // reintento rapido tras error
+#define POLL_RETRY_INIT_MS     100    // backoff inicial tras error
+#define POLL_RETRY_MAX_MS      2000   // techo del backoff
 #define STATUS_INTERVAL_MS     5000
 
 // ================== DISPLAY ==================
@@ -237,56 +238,76 @@ void confirmarComando(const char* cmd_id) {
 // Devuelve true si el servidor respondio bien.
 bool consultarComandos() {
   if (!wifi_connected) return false;
-  HTTPClient http;
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  String url = String(API_URL) + "/api/v1/cronometro/comandos-pendientes"
-             + "?wait=" + LONG_POLL_WAIT_S
-             + "&rssi=" + (int) WiFi.RSSI()
-             + "&voltaje_mv=5000"
-             + "&uptime_sec=" + (millis() / 1000)
-             + "&reset_reason=" + reset_reason;
-  http.begin(url);
-  http.addHeader("Authorization", String("Bearer ") + API_TOKEN);
-  int code = http.GET();
 
-  if (code == 200) {
-    http_ok++;
-    String body = http.getString();
-    StaticJsonDocument<2048> doc;
-    if (deserializeJson(doc, body) == DeserializationError::Ok) {
-      JsonArray comandos = doc["comandos"].as<JsonArray>();
-      for (JsonObject cmd : comandos) {
-        const char* tipo = cmd["tipo"];
-        const char* cmd_id = cmd["id"];
-        if (!tipo || !cmd_id) continue;
+  // Fase 1: GET y recolectar comandos + IDs
+  char ids_confirmar[4][40];
+  uint8_t n_confirmar = 0;
+  int code;
 
-        Serial.printf("[CMD] tipo=%s id=%s\n", tipo, cmd_id);
+  {
+    HTTPClient http;
+    http.setTimeout(HTTP_TIMEOUT_MS);
+    String url = String(API_URL) + "/api/v1/cronometro/comandos-pendientes"
+               + "?wait=" + LONG_POLL_WAIT_S
+               + "&rssi=" + (int) WiFi.RSSI()
+               + "&voltaje_mv=5000"
+               + "&uptime_sec=" + (millis() / 1000)
+               + "&reset_reason=" + reset_reason;
+    http.begin(url);
+    http.addHeader("Authorization", String("Bearer ") + API_TOKEN);
+    code = http.GET();
 
-        if (strcmp(tipo, "start") == 0) cmdStart();
-        else if (strcmp(tipo, "stop") == 0) cmdStop();
-        else if (strcmp(tipo, "reset") == 0) cmdReset();
-        else if (strcmp(tipo, "set_tiempo") == 0) {
-          uint32_t ms = cmd["payload"]["ms"] | 0;
-          cmdSetTiempo(ms);
+    if (code == 200) {
+      http_ok++;
+      String body = http.getString();
+      http.end();  // cerrar ANTES de parsear
+
+      static StaticJsonDocument<2048> doc;
+      if (deserializeJson(doc, body) == DeserializationError::Ok) {
+        JsonArray comandos = doc["comandos"].as<JsonArray>();
+        for (JsonObject cmd : comandos) {
+          const char* tipo = cmd["tipo"];
+          const char* cmd_id = cmd["id"];
+          if (!tipo || !cmd_id) continue;
+
+          Serial.printf("[CMD] tipo=%s id=%s\n", tipo, cmd_id);
+
+          if (strcmp(tipo, "start") == 0) cmdStart();
+          else if (strcmp(tipo, "stop") == 0) cmdStop();
+          else if (strcmp(tipo, "reset") == 0) cmdReset();
+          else if (strcmp(tipo, "set_tiempo") == 0) {
+            uint32_t ms = cmd["payload"]["ms"] | 0;
+            cmdSetTiempo(ms);
+          }
+          else if (strcmp(tipo, "set_tripulacion") == 0) {
+            int numero = cmd["payload"]["numero"] | 0;
+            String num = String(numero);
+            int v = cmd["payload"]["vuelta"] | 1;
+            cmdSetTripulacion(num, v);
+          }
+          else if (strcmp(tipo, "sensor_armado") == 0) {
+            uint32_t seg = cmd["payload"]["segundos"] | 35;
+            cmdSensorArmado(seg);
+          }
+
+          if (n_confirmar < 4) {
+            strncpy(ids_confirmar[n_confirmar], cmd_id, 39);
+            ids_confirmar[n_confirmar][39] = '\0';
+            n_confirmar++;
+          }
         }
-        else if (strcmp(tipo, "set_tripulacion") == 0) {
-          int numero = cmd["payload"]["numero"] | 0;
-          String num = String(numero);
-          int v = cmd["payload"]["vuelta"] | 1;
-          cmdSetTripulacion(num, v);
-        }
-        else if (strcmp(tipo, "sensor_armado") == 0) {
-          uint32_t seg = cmd["payload"]["segundos"] | 35;
-          cmdSensorArmado(seg);
-        }
-
-        confirmarComando(cmd_id);
       }
+    } else {
+      http.end();
+      http_err++;
     }
-  } else {
-    http_err++;
+  } // HTTPClient destruido
+
+  // Fase 2: confirmar (sin HTTPClient anidado)
+  for (uint8_t i = 0; i < n_confirmar; i++) {
+    confirmarComando(ids_confirmar[i]);
   }
-  http.end();
+
   return code == 200;
 }
 
@@ -294,6 +315,7 @@ bool consultarComandos() {
 void tareaHTTP(void* param) {
   uint32_t last_status = 0;
   uint32_t last_ok_ms = millis();
+  uint32_t poll_retry_ms = POLL_RETRY_INIT_MS;
 
   for (;;) {
     wifi_connected = (WiFi.status() == WL_CONNECTED);
@@ -303,19 +325,23 @@ void tareaHTTP(void* param) {
       if (ok) {
         last_ok_ms = millis();
         sin_conexion = false;
+        poll_retry_ms = POLL_RETRY_INIT_MS;  // reset backoff
       } else {
-        vTaskDelay(pdMS_TO_TICKS(POLL_RETRY_MS));
+        vTaskDelay(pdMS_TO_TICKS(poll_retry_ms));
+        if (poll_retry_ms < POLL_RETRY_MAX_MS) poll_retry_ms *= 2;
       }
 
-      // Sin respuesta 30s → reconectar WiFi + indicador
+      // Sin respuesta 30s → indicador, reconectar solo si WiFi caido
       uint32_t sin_respuesta = millis() - last_ok_ms;
       if (sin_respuesta > 30000) {
         sin_conexion = true;
-        Serial.println("[NET] 30s sin respuesta, reconectando WiFi...");
-        WiFi.disconnect(false, false);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        WiFi.begin(WIFI_SSID, WIFI_PASS);
-        last_ok_ms = millis();
+        if (WiFi.status() != WL_CONNECTED) {
+          Serial.println("[NET] 30s sin respuesta + WiFi caido, reconectando...");
+          WiFi.disconnect(false, false);
+          vTaskDelay(pdMS_TO_TICKS(1000));
+          WiFi.begin(WIFI_SSID, WIFI_PASS);
+          last_ok_ms = millis();
+        }
       }
 
       if (millis() - last_status > STATUS_INTERVAL_MS) {
@@ -418,7 +444,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     tareaHTTP,    // funcion
     "http",       // nombre
-    8192,         // stack bytes
+    16384,        // stack bytes (HTTPClient + JSON necesitan espacio)
     NULL,         // parametro
     1,            // prioridad
     &http_task,   // handle (para suspender durante OTA)
