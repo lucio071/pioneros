@@ -70,7 +70,7 @@ volatile uint8_t hq_head = 0;
 volatile uint8_t hq_tail = 0;
 
 // ================== COLA TX LoRa (HTTP -> LoRa) ==================
-#define TX_Q_SIZE  8
+#define TX_Q_SIZE  16
 struct TxCmd {
   uint8_t dst_id;
   uint8_t tipo;
@@ -80,6 +80,12 @@ struct TxCmd {
 };
 TxCmd tx_q[TX_Q_SIZE];
 volatile uint8_t tq_head = 0;
+
+// TX no bloqueante: una transmision por pasada del loop
+bool tx_en_curso = false;
+TxCmd tx_actual;
+uint8_t tx_intento = 0;
+uint32_t tx_proximo_ms = 0;
 volatile uint8_t tq_tail = 0;
 
 // ================== ESTADO ==================
@@ -161,10 +167,10 @@ void enviarComandoLoRa(uint8_t dst_id, uint8_t tipo, uint8_t* extra, size_t extr
   packet[payload_size + 1] = (crc >> 8) & 0xFF;
   payload_size += 2;
 
-  // CSMA: esperar si el canal esta ocupado
-  for (int csma = 0; csma < 5; csma++) {
+  // CSMA: esperar si el canal esta ocupado (2 intentos, SF7 paquete ~10ms)
+  for (int csma = 0; csma < 2; csma++) {
     if (LoRa.rssi() < -90) break;
-    delay(random(20, 60));
+    delay(random(5, 15));
   }
   LoRa.beginPacket();
   LoRa.write(packet, payload_size);
@@ -539,14 +545,19 @@ void loop() {
     LoRa.receive();
   }
 
-  // 2. Procesar cola TX LoRa (comandos del servidor)
-  while (tq_tail != tq_head) {
-    TxCmd cmd = tx_q[tq_tail];
+  // 2. TX LoRa no bloqueante: una transmision por pasada
+  if (!tx_en_curso && tq_tail != tq_head) {
+    tx_actual = tx_q[tq_tail];
     tq_tail = (tq_tail + 1) % TX_Q_SIZE;
-    for (uint8_t r = 0; r < cmd.retries; r++) {
-      enviarComandoLoRa(cmd.dst_id, cmd.tipo, cmd.extra, cmd.extra_len);
-      if (r < cmd.retries - 1) delay(200);
-    }
+    tx_en_curso = true;
+    tx_intento = 0;
+    tx_proximo_ms = millis();
+  }
+  if (tx_en_curso && millis() >= tx_proximo_ms) {
+    enviarComandoLoRa(tx_actual.dst_id, tx_actual.tipo, tx_actual.extra, tx_actual.extra_len);
+    tx_intento++;
+    if (tx_intento >= tx_actual.retries) tx_en_curso = false;
+    else tx_proximo_ms = millis() + 200;
   }
 
   // 3. Actualizar OLED cada 1s
