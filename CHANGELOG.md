@@ -1,5 +1,13 @@
 # CHANGELOG — Sistema de Cronometraje Pioneros 4x4
 
+## 2026-09-25
+
+### Gateway socket exhaustion fix
+- POLL_INTERVAL_MS 2000 -> 5000 (60% menos GET de comandos)
+- http.setReuse(true) en las 5 funciones HTTP (reutiliza conexion TCP)
+- Cruces (EV_CRUCE) no dependen del poll, se procesan inmediatamente via cola
+- PHP-FPM: pm.start_servers 2->8, min_spare 1->4, max_spare 3->10
+
 ## 2026-09-24
 
 ### Gateway estabilidad

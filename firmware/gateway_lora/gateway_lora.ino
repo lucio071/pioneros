@@ -24,7 +24,7 @@
 #define API_URL    "http://192.168.100.5"
 
 #define HTTP_TIMEOUT_MS    5000
-#define POLL_INTERVAL_MS   2000
+#define POLL_INTERVAL_MS   5000
 
 // ================== PINOUT T3 V1.6.1 ==================
 #define LORA_SCK   5
@@ -265,6 +265,7 @@ bool enviarEventoApp(const char* token, const char* tramo, uint32_t delta_ms) {
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.begin(String(API_URL) + "/api/v1/cronometro/eventos");
+  http.setReuse(true);
   http.addHeader("Authorization", String("Bearer ") + token);
   http.addHeader("Content-Type", "application/json");
 
@@ -288,6 +289,7 @@ bool enviarHeartbeatApp(const char* token, int rssi, int voltaje_mv, uint32_t up
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.begin(String(API_URL) + "/api/v1/cronometro/heartbeat");
+  http.setReuse(true);
   http.addHeader("Authorization", String("Bearer ") + token);
   http.addHeader("Content-Type", "application/json");
 
@@ -316,6 +318,7 @@ void consultarComandos(const char* token, uint8_t dst_id) {
     HTTPClient http;
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.begin(String(API_URL) + "/api/v1/cronometro/comandos-pendientes");
+    http.setReuse(true);
     http.addHeader("Authorization", String("Bearer ") + token);
     int code = http.GET();
 
@@ -375,6 +378,7 @@ void consultarComandos(const char* token, uint8_t dst_id) {
     HTTPClient http;
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.begin(String(API_URL) + "/api/v1/cronometro/comandos/" + ids_confirmar[i] + "/confirmar");
+    http.setReuse(true);
     http.addHeader("Authorization", String("Bearer ") + token);
     int rc = http.POST("");
     http.end();
@@ -426,6 +430,7 @@ void tareaHTTP(void* param) {
         HTTPClient http;
         http.setTimeout(HTTP_TIMEOUT_MS);
         http.begin(String(API_URL) + "/api/v1/cronometro/heartbeat");
+        http.setReuse(true);
         http.addHeader("Authorization", String("Bearer ") + GW_TOKEN);
         http.addHeader("Content-Type", "application/json");
         StaticJsonDocument<128> doc;
