@@ -192,6 +192,7 @@ async function guardarOrden() {
   }
   showToast("Orden guardado y bloqueado")
   ordenBloqueado.value = true
+  showPares.value = false  // cerrar panel de sorteo, mostrar pares actualizados
   await load()
   initOrdenList()
 }
