@@ -414,6 +414,13 @@ async function armarLargada() {
       if (!(await autoReincorporar(t))) return
     }
 
+    // Auto-marcar en_pista si están inscriptas
+    for (const t of tripsAChequear) {
+      if (t?.estado === 'inscripta') {
+        await apiMutate('POST', `/tripulaciones/${t.id}/salio-a-pista`).catch(() => {})
+      }
+    }
+
     if (selectedTripB.value) {
       // Pista doble: usa endpoint que arma ambas pistas + semaforo + sensores
       const tripA = tripEnPistaA.value
@@ -1436,17 +1443,6 @@ if (typeof window !== 'undefined') {
                 <button @click="resetPista('B')" class="bg-gray-100 hover:bg-gray-200 text-gray-500 text-[10px] font-medium py-1.5 rounded">Reset B</button>
               </div>
             </div>
-
-            <!-- Salio a pista (doble: marca los dos) -->
-            <button v-if="selectedTripB && (selectedTrip.estado === 'inscripta' || selectedTripB.estado === 'inscripta')"
-              @click="salioAPistaDoble"
-              class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-lg text-lg">
-              Salieron a pista (#{{ selectedTrip.numero }} + #{{ selectedTripB.numero }})
-            </button>
-            <button v-else-if="!selectedTripB && selectedTrip.estado === 'inscripta'" @click="salioAPista"
-              class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-lg text-lg">
-              Salio a pista
-            </button>
 
             <!-- Vuelta selector -->
             <div class="flex gap-1.5 overflow-x-auto">
