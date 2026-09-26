@@ -21,7 +21,7 @@
 
 // ================== CONFIGURACION ==================
 #include "config.h"   // WIFI_SSID, WIFI_PASS, GW_TOKEN, TOKEN_SENSOR_A/B, TOKEN_SEMAFORO
-#define API_URL    "http://192.168.100.5"
+#define API_URL    "http://192.168.0.5"
 
 #define HTTP_TIMEOUT_MS    5000
 #define POLL_INTERVAL_MS   5000

@@ -28,7 +28,7 @@
 #include <esp_system.h>
 
 // ================== CONSTANTES ==================
-#define API_URL    "http://192.168.100.5"
+#define API_URL    "http://192.168.0.5"
 #define LONG_POLL_WAIT_S       3     // el servidor retiene el GET hasta 3 s
 #define HTTP_TIMEOUT_MS        (LONG_POLL_WAIT_S * 1000 + 3000)
 #define POLL_RETRY_INIT_MS     100    // backoff inicial tras error
