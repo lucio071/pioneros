@@ -385,6 +385,15 @@ class CarreraSimulacionTest extends TestCase
         $vuelta->refresh()->load('tramos.tiemposMuertos');
         $totalCompleta = $vuelta->calcularTotal($this->fc->penal_estaca_seg, $this->fc->penal_cinta_seg, $this->fc->penal_estirada_seg);
         $this->assertEquals(170000, $totalCompleta, 'Vuelta completa (A+B) = 80000 + 90000');
+
+        // mejorVueltaMs filtra vueltas incompletas en doble
+        $trip->refresh();
+        // Agregar V2 con solo tramo A (incompleta)
+        $this->guardarTramo($trip, 2, 'A', 50000)->assertOk();
+        $trip->refresh();
+        $mejorMs = $trip->mejorVueltaMs($this->fc);
+        // Debe tomar V1 (170000) no V2 (50000 incompleta)
+        $this->assertEquals(170000, $mejorMs, 'mejorVueltaMs debe ignorar vueltas incompletas en doble');
     }
 
     /**
@@ -417,5 +426,143 @@ class CarreraSimulacionTest extends TestCase
 
         // Diferencia del segundo = su tiempo - tiempo del primero
         $this->assertEquals(10000, $ranked[1]['diferencia'], 'Diferencia de #301 = 150000-140000');
+    }
+
+    /**
+     * 14. Carrera completa: 2 pares, V1 + V2, ranking final
+     */
+    public function test_carrera_completa_dos_pares(): void
+    {
+        // Par 1: #301 vs #302 — V1
+        $this->guardarTramo($this->trips[0], 1, 'A', 80000)->assertOk(); // #301 corrida 1
+        $this->guardarTramo($this->trips[1], 1, 'B', 85000)->assertOk(); // #302 corrida 1
+        $this->guardarTramo($this->trips[1], 1, 'A', 82000)->assertOk(); // #302 corrida 2
+        $this->guardarTramo($this->trips[0], 1, 'B', 88000)->assertOk(); // #301 corrida 2
+
+        // Par 2: #303 vs #304 — V1
+        $this->guardarTramo($this->trips[2], 1, 'A', 75000)->assertOk();
+        $this->guardarTramo($this->trips[3], 1, 'B', 90000)->assertOk();
+        $this->guardarTramo($this->trips[3], 1, 'A', 87000)->assertOk();
+        $this->guardarTramo($this->trips[2], 1, 'B', 78000)->assertOk();
+
+        // V2: Par 1
+        $this->guardarTramo($this->trips[0], 2, 'A', 70000)->assertOk();
+        $this->guardarTramo($this->trips[1], 2, 'B', 72000)->assertOk();
+        $this->guardarTramo($this->trips[1], 2, 'A', 71000)->assertOk();
+        $this->guardarTramo($this->trips[0], 2, 'B', 75000)->assertOk();
+
+        $ranking = $this->getRanking();
+        $ranked = collect($ranking['ranking'] ?? []);
+
+        // 4 autos clasificados
+        $this->assertCount(4, $ranked, 'Deben estar los 4 clasificados');
+
+        // #301: V1=168000, V2=145000 → mejor=145000
+        $trip301 = $ranked->firstWhere('numero', '301');
+        $this->assertEquals(145000, $trip301['mejor_vuelta_ms'], '#301 mejor vuelta = V2 (145000)');
+
+        // #303: V1=153000 (unica) → mejor=153000
+        $trip303 = $ranked->firstWhere('numero', '303');
+        $this->assertEquals(153000, $trip303['mejor_vuelta_ms'], '#303 mejor vuelta = V1 (153000)');
+    }
+
+    /**
+     * 15. Vuelta nula + vuelta válida: trip tiene V1 nula y V2 válida, clasifica por V2
+     */
+    public function test_vuelta_nula_mas_valida_clasifica(): void
+    {
+        $trip = $this->trips[0];
+
+        // V1: crear y anular
+        $this->guardarTramo($trip, 1, 'A', 0)->assertOk();
+        $vuelta1 = $trip->fresh()->vueltas()->where('numero_vuelta', 1)->first();
+        $this->actingAs($this->admin)->postJson("/api/v1/vueltas/{$vuelta1->id}/nula")->assertOk();
+
+        // V2: completa
+        $this->guardarTramo($trip, 2, 'A', 70000)->assertOk();
+        $this->guardarTramo($trip, 2, 'B', 80000)->assertOk();
+
+        $trip->refresh();
+        $mejorMs = $trip->mejorVueltaMs($this->fc);
+        $this->assertEquals(150000, $mejorMs, 'Con V1 nula y V2 válida, mejor = V2 (150000)');
+    }
+
+    /**
+     * 16. Confirmar vuelta: no se puede modificar después de confirmar
+     */
+    public function test_vuelta_confirmada_no_modificable(): void
+    {
+        $trip = $this->trips[0];
+
+        $this->guardarTramo($trip, 1, 'A', 80000)->assertOk();
+        $this->guardarTramo($trip, 1, 'B', 85000)->assertOk();
+
+        // Confirmar
+        $vuelta = $trip->fresh()->vueltas()->where('numero_vuelta', 1)->first();
+        $this->actingAs($this->admin)->postJson("/api/v1/vueltas/{$vuelta->id}/confirmar")->assertOk();
+
+        // Intentar modificar → debe rechazar
+        $response = $this->guardarTramo($trip, 1, 'A', 70000);
+        $response->assertStatus(422);
+    }
+
+    /**
+     * 17. Tiempo muerto múltiple: 2 TM en el mismo tramo se restan ambos
+     */
+    public function test_multiples_tiempos_muertos(): void
+    {
+        $trip = $this->trips[0];
+
+        // Tramo A: 120000ms + TM 15s + TM 25s = 120000 - 40000 = 80000
+        $this->guardarTramo($trip, 1, 'A', 120000, 0, 0, 0, [15, 25])->assertOk();
+        $this->guardarTramo($trip, 1, 'B', 60000)->assertOk();
+
+        $vuelta = $trip->fresh()->vueltas()->where('numero_vuelta', 1)->with('tramos.tiemposMuertos')->first();
+        $tramoA = $vuelta->tramos->where('letra', 'A')->first();
+
+        $this->assertCount(2, $tramoA->tiemposMuertos, 'Deben haber 2 TM');
+        $totalTM = $tramoA->totalTrancasSeg();
+        $this->assertEquals(40, $totalTM, 'Total TM = 15 + 25 = 40s');
+
+        $tiempoConPenal = $tramoA->tiempoConPenal($this->fc->penal_estaca_seg, $this->fc->penal_cinta_seg, $this->fc->penal_estirada_seg);
+        $this->assertEquals(80000, $tiempoConPenal, '120000 - 40000(TM) = 80000');
+    }
+
+    /**
+     * 18. Finalizar fecha: clasificados y DNF correctos
+     */
+    public function test_finalizar_fecha_ranking_correcto(): void
+    {
+        // #301: V1 completa
+        $this->guardarTramo($this->trips[0], 1, 'A', 80000)->assertOk();
+        $this->guardarTramo($this->trips[0], 1, 'B', 85000)->assertOk();
+
+        // #302: V1 completa (más lento)
+        $this->guardarTramo($this->trips[1], 1, 'A', 90000)->assertOk();
+        $this->guardarTramo($this->trips[1], 1, 'B', 95000)->assertOk();
+
+        // #303: abandonado
+        $this->actingAs($this->admin)->postJson("/api/v1/tripulaciones/{$this->trips[2]->id}/abandonar")->assertOk();
+
+        // #304: sin vueltas
+
+        // Finalizar
+        $this->actingAs($this->admin)->postJson("/api/v1/fechas/{$this->fecha->id}/finalizar")->assertOk();
+
+        $ranking = $this->getRanking();
+        $ranked = collect($ranking['ranking'] ?? []);
+        $dnf = collect($ranking['dnf'] ?? []);
+
+        // #301 y #302 clasificados
+        $this->assertTrue($ranked->contains('numero', '301'));
+        $this->assertTrue($ranked->contains('numero', '302'));
+        $this->assertEquals(1, $ranked->firstWhere('numero', '301')['posicion']);
+        $this->assertEquals(2, $ranked->firstWhere('numero', '302')['posicion']);
+
+        // #303 DNF (abandonado)
+        $this->assertTrue($dnf->contains('numero', '303'), '#303 abandonado debe ser DNF');
+
+        // #304 DNF (sin vueltas, fecha finalizada)
+        $this->assertTrue($dnf->contains('numero', '304'), '#304 sin vueltas debe ser DNF al finalizar');
     }
 }
