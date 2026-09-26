@@ -688,6 +688,33 @@ function selectTrip(t: any) {
   resetTramoForms()
 }
 
+function siguientePar(): { tripA: any, tripB: any } | null {
+  const sorted = [...tripulaciones.value].sort((a: any, b: any) => (a.orden_largada || 99) - (b.orden_largada || 99))
+  // Buscar el primer par donde alguna trip no completó todas las vueltas
+  for (let i = 0; i < sorted.length; i += 2) {
+    const tA = sorted[i]
+    const tB = sorted[i + 1] || null
+    // Saltar si es el par actual
+    if (selectedTrip.value && tA.id === selectedTrip.value.id) continue
+    // Verificar si alguno tiene vueltas pendientes
+    const totalV = fecha.value?.vueltas_clasificacion || 1
+    const vCompletasA = (tA.vueltas || []).filter((v: any) => !v.nula && v.tramos?.length >= 2).length
+    const vCompletasB = tB ? (tB.vueltas || []).filter((v: any) => !v.nula && v.tramos?.length >= 2).length : totalV
+    if (vCompletasA < totalV || vCompletasB < totalV) {
+      return { tripA: tA, tripB: tB }
+    }
+  }
+  return null
+}
+
+function irASiguientePar() {
+  const par = siguientePar()
+  if (!par) { showToast('No hay más pares pendientes'); return }
+  pistaATrip.value = par.tripA
+  pistaBTrip.value = par.tripB
+  iniciarParManual()
+}
+
 function calcularVueltaPendiente(tripA: any, tripB: any): number {
   const total = fecha.value?.vueltas_clasificacion || 1
   for (let n = 1; n <= total; n++) {
@@ -1598,10 +1625,29 @@ if (typeof window !== 'undefined') {
               class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg text-lg transition-colors">
               Guardar Corrida {{ corridaActual }} — V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }}
             </button>
-            <div v-else-if="selectedTripB && vueltaCompleta(selectedVuelta)"
-              class="w-full bg-gray-100 text-gray-500 font-bold py-3 rounded-lg text-lg text-center">
-              V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }} completa &#x2713;
-            </div>
+            <template v-else-if="selectedTripB && vueltaCompleta(selectedVuelta)">
+              <div class="w-full bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
+                <p class="text-center text-green-700 font-bold text-lg">V{{ selectedVuelta === 99 ? 'F' : selectedVuelta }} completa &#x2713;</p>
+                <!-- Resumen de tiempos -->
+                <div class="grid grid-cols-2 gap-2 text-center text-sm">
+                  <div v-for="trip in [selectedTrip, selectedTripB]" :key="trip.id" class="bg-white rounded p-2">
+                    <p class="font-bold text-gray-700">#{{ trip.numero }}</p>
+                    <p class="font-mono text-lg" v-if="trip.vueltas?.find((v: any) => v.numero_vuelta === selectedVuelta)">
+                      {{ formatTiempo(trip.vueltas.find((v: any) => v.numero_vuelta === selectedVuelta)?.total_vuelta) }}
+                    </p>
+                    <p class="text-xs text-gray-400" v-for="tr in (trip.vueltas?.find((v: any) => v.numero_vuelta === selectedVuelta)?.tramos || [])" :key="tr.id">
+                      {{ tr.letra }}: {{ formatTiempo(tr.tiempo_ms) }}
+                      <span v-if="tr.estacas || tr.cintas || tr.estiradas" class="text-orange-500">{{ tr.estacas }}E {{ tr.cintas }}C{{ tr.estiradas ? ' ' + tr.estiradas + 'S' : '' }}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <!-- Siguiente par -->
+              <button v-if="siguientePar()" @click="irASiguientePar"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg text-lg transition-colors">
+                Siguiente par: #{{ siguientePar()?.tripA?.numero }} vs #{{ siguientePar()?.tripB?.numero || 'solo' }}
+              </button>
+            </template>
 
             <!-- Abandonar vuelta (pista doble) -->
             <div v-if="selectedTripB" class="grid grid-cols-2 gap-2">
