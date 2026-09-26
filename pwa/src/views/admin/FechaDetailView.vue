@@ -1066,7 +1066,7 @@ if (typeof window !== 'undefined') {
         </div>
         <div class="flex gap-1">
           <button v-for="t in (['config', 'inscripcion', 'cronometraje', 'ranking'] as const)" :key="t"
-            @click="tab = t; if (t === 'cronometraje') { startCronoPolling(); restaurarParActivo() } else { selectedTrip = null; selectedTripB = null; stopCronoPolling() }"
+            @click="tab = t; if (t === 'cronometraje') { startCronoPolling(); restaurarParActivo() } else { stopCronoPolling() }"
             :class="['px-3 py-1.5 rounded-t-lg text-xs font-medium transition-colors',
               tab === t ? 'bg-gray-50 text-gray-800' : 'text-white/60 hover:text-white']">
             {{ { config: 'Config', inscripcion: 'Inscripcion', cronometraje: 'Crono', ranking: 'Ranking' }[t] }}
