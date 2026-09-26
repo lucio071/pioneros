@@ -23,7 +23,7 @@ const auth = useAuthStore()
 
 // Config - catalogo para agregar categorias
 const catalogo = ref<any[]>([])
-const addCatForm = ref({ categoria_catalogo_id: '', penal_estaca_seg: 5, penal_cinta_seg: 10, tipo_pista: null as string | null })
+const addCatForm = ref({ categoria_catalogo_id: '', penal_estaca_seg: 5, penal_cinta_seg: 10, penal_estirada_seg: 60, tipo_pista: null as string | null })
 const showAddCat = ref(false)
 
 // Inscripcion
@@ -224,6 +224,7 @@ async function guardarCorrida() {
   const bodyPistaA: any = {
     estacas: tramoA.value.estacas,
     cintas: tramoA.value.cintas,
+    estiradas: tramoA.value.estiradas,
     tiempos_muertos: tramoA.value.tiempos_muertos,
   }
   if (msA > 0) bodyPistaA.tiempo_ms = msA
@@ -231,6 +232,7 @@ async function guardarCorrida() {
   const bodyPistaB: any = tripB ? {
     estacas: tramoB.value.estacas,
     cintas: tramoB.value.cintas,
+    estiradas: tramoB.value.estiradas,
     tiempos_muertos: tramoB.value.tiempos_muertos,
   } : null
   if (bodyPistaB && msB > 0) bodyPistaB.tiempo_ms = msB
@@ -295,8 +297,8 @@ async function salioAPistaDoble() {
 
 const selectedTrip = ref<any>(null)
 const selectedVuelta = ref(1)
-const tramoA = ref({ tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] as number[] })
-const tramoB = ref({ tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] as number[] })
+const tramoA = ref({ tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, estiradas: 0, tiempos_muertos: [] as number[] })
+const tramoB = ref({ tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, estiradas: 0, tiempos_muertos: [] as number[] })
 const tmInputA = ref({ min: '', seg: '' })
 const tmInputB = ref({ min: '', seg: '' })
 
@@ -507,9 +509,10 @@ function imprimirTiempo(trip: any, vuelta: any) {
   lines += vn + ' - ' + catNom + '\n'
   for (const tr of tramos) {
     lines += 'Pista ' + tr.letra + ':  ' + formatTiempo(tr.tiempo_ms) + '\n'
-    if (tr.estacas || tr.cintas) {
-      const pms = (tr.estacas * pe + tr.cintas * pc) * 1000
-      lines += '  E:' + tr.estacas + ' C:' + tr.cintas + ' +' + formatTiempo(pms) + '\n'
+    if (tr.estacas || tr.cintas || tr.estiradas) {
+      const pes = 60  // penal estirada seg
+      const pms = (tr.estacas * pe + tr.cintas * pc + (tr.estiradas || 0) * pes) * 1000
+      lines += '  E:' + tr.estacas + ' C:' + tr.cintas + (tr.estiradas ? ' S:' + tr.estiradas : '') + ' +' + formatTiempo(pms) + '\n'
     }
   }
   lines += '------------------------\n'
@@ -609,7 +612,7 @@ async function addCategoriaToFecha() {
   try {
     await apiMutate('POST', `/fechas/${route.params.id}/categorias`, addCatForm.value)
     showAddCat.value = false
-    addCatForm.value = { categoria_catalogo_id: '', penal_estaca_seg: 5, penal_cinta_seg: 10, tipo_pista: null as string | null }
+    addCatForm.value = { categoria_catalogo_id: '', penal_estaca_seg: 5, penal_cinta_seg: 10, penal_estirada_seg: 60, tipo_pista: null as string | null }
     showToast('Categoria agregada')
     await load()
   } catch (e: any) {
@@ -731,6 +734,7 @@ function cargarTramoEnForm(form: any, tr: any) {
   form.value.tiempo_ms = String(Math.floor((ms % 1000) / 10)) || ''
   form.value.estacas = tr.estacas || 0
   form.value.cintas = tr.cintas || 0
+  form.value.estiradas = tr.estiradas || 0
   form.value.tiempos_muertos = (tr.tiempos_muertos || []).map((tm: any) => tm.segundos || tm)
 }
 
@@ -805,8 +809,8 @@ function buscarTramo(trip: any, letra: string) {
 }
 
 function resetTramoForms() {
-  tramoA.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] }
-  tramoB.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, tiempos_muertos: [] }
+  tramoA.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, estiradas: 0, tiempos_muertos: [] }
+  tramoB.value = { tiempo_min: '', tiempo_sec: '', tiempo_ms: '', estacas: 0, cintas: 0, estiradas: 0, tiempos_muertos: [] }
   tmInputA.value = { min: '', seg: '' }
   tmInputB.value = { min: '', seg: '' }
 
@@ -840,6 +844,7 @@ async function guardarTramo(letra: 'A' | 'B') {
     tiempo_ms: tramoToMs(form),
     estacas: form.estacas,
     cintas: form.cintas,
+    estiradas: form.estiradas,
     tiempos_muertos: form.tiempos_muertos,
   }
 
@@ -1125,7 +1130,7 @@ if (typeof window !== 'undefined') {
                     <p class="font-mono text-gray-700 font-medium">{{ formatTiempo(v.total_vuelta) }}</p>
                     <div v-for="tr in v.tramos" :key="tr.id" class="text-[10px] text-gray-400 mt-0.5 flex justify-between">
                       <span>{{ tr.letra }}: {{ formatTiempo(tr.tiempo_ms) }}</span>
-                      <span v-if="tr.estacas || tr.cintas" class="text-orange-500">{{ tr.estacas }}E {{ tr.cintas }}C</span>
+                      <span v-if="tr.estacas || tr.cintas || tr.estiradas" class="text-orange-500">{{ tr.estacas }}E {{ tr.cintas }}C{{ tr.estiradas ? ' ' + tr.estiradas + 'S' : '' }}</span>
                     </div>
                   </template>
                 </div>
@@ -1136,7 +1141,7 @@ if (typeof window !== 'undefined') {
                   <p class="font-mono text-gray-700 font-medium">{{ formatTiempo(t.vuelta_final.total_vuelta) }}</p>
                   <div v-for="tr in t.vuelta_final.tramos" :key="tr.id" class="text-[10px] text-gray-400 mt-0.5 flex justify-between">
                     <span>{{ tr.letra }}: {{ formatTiempo(tr.tiempo_ms) }}</span>
-                    <span v-if="tr.estacas || tr.cintas" class="text-orange-500">{{ tr.estacas }}E {{ tr.cintas }}C</span>
+                    <span v-if="tr.estacas || tr.cintas || tr.estiradas" class="text-orange-500">{{ tr.estacas }}E {{ tr.cintas }}C{{ tr.estiradas ? ' ' + tr.estiradas + 'S' : '' }}</span>
                   </div>
                 </div>
               </div>
@@ -1371,7 +1376,7 @@ if (typeof window !== 'undefined') {
                     </div>
                     <div v-for="tr in v.tramos" :key="tr.id" class="text-[10px] text-gray-400 ml-2">
                       {{ tr.letra }}: {{ formatTiempo(tr.tiempo_ms) }}
-                      <span v-if="tr.estacas || tr.cintas" class="text-orange-500">{{ tr.estacas }}E {{ tr.cintas }}C</span>
+                      <span v-if="tr.estacas || tr.cintas || tr.estiradas" class="text-orange-500">{{ tr.estacas }}E {{ tr.cintas }}C{{ tr.estiradas ? ' ' + tr.estiradas + 'S' : '' }}</span>
                     </div>
                   </div>
                   <p v-if="!trip.vueltas?.length" class="text-[10px] text-gray-300">Sin tiempos</p>
@@ -1487,21 +1492,29 @@ if (typeof window !== 'undefined') {
                     class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
                     @input="selectedTripB ? autotab($event, 'b-min') : undefined" />
                 </div>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-3 gap-2">
                   <div>
                     <label class="text-xs text-gray-400">Estacas</label>
-                    <div class="flex items-center gap-2">
-                      <button @click="tramoA.estacas = Math.max(0, tramoA.estacas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
-                      <span class="text-xl font-mono w-6 text-center">{{ tramoA.estacas }}</span>
-                      <button @click="tramoA.estacas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    <div class="flex items-center gap-1">
+                      <button @click="tramoA.estacas = Math.max(0, tramoA.estacas - 1)" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-lg font-mono w-5 text-center">{{ tramoA.estacas }}</span>
+                      <button @click="tramoA.estacas++" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
                     </div>
                   </div>
                   <div>
                     <label class="text-xs text-gray-400">Cintas</label>
-                    <div class="flex items-center gap-2">
-                      <button @click="tramoA.cintas = Math.max(0, tramoA.cintas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
-                      <span class="text-xl font-mono w-6 text-center">{{ tramoA.cintas }}</span>
-                      <button @click="tramoA.cintas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    <div class="flex items-center gap-1">
+                      <button @click="tramoA.cintas = Math.max(0, tramoA.cintas - 1)" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-lg font-mono w-5 text-center">{{ tramoA.cintas }}</span>
+                      <button @click="tramoA.cintas++" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="text-xs text-gray-400">Estiradas</label>
+                    <div class="flex items-center gap-1">
+                      <button @click="tramoA.estiradas = Math.max(0, tramoA.estiradas - 1)" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-lg font-mono w-5 text-center">{{ tramoA.estiradas }}</span>
+                      <button @click="tramoA.estiradas++" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
                     </div>
                   </div>
                 </div>
@@ -1541,21 +1554,29 @@ if (typeof window !== 'undefined') {
                   <input v-model="tramoB.tiempo_ms" data-ref="b-cc" inputmode="numeric" maxlength="2" placeholder="00"
                     class="w-14 text-center text-xl font-mono border border-gray-300 rounded-lg py-2.5 outline-none focus:ring-2 focus:ring-amber-500" />
                 </div>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-3 gap-2">
                   <div>
                     <label class="text-xs text-gray-400">Estacas</label>
-                    <div class="flex items-center gap-2">
-                      <button @click="tramoB.estacas = Math.max(0, tramoB.estacas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
-                      <span class="text-xl font-mono w-6 text-center">{{ tramoB.estacas }}</span>
-                      <button @click="tramoB.estacas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    <div class="flex items-center gap-1">
+                      <button @click="tramoB.estacas = Math.max(0, tramoB.estacas - 1)" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-lg font-mono w-5 text-center">{{ tramoB.estacas }}</span>
+                      <button @click="tramoB.estacas++" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
                     </div>
                   </div>
                   <div>
                     <label class="text-xs text-gray-400">Cintas</label>
-                    <div class="flex items-center gap-2">
-                      <button @click="tramoB.cintas = Math.max(0, tramoB.cintas - 1)" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
-                      <span class="text-xl font-mono w-6 text-center">{{ tramoB.cintas }}</span>
-                      <button @click="tramoB.cintas++" class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    <div class="flex items-center gap-1">
+                      <button @click="tramoB.cintas = Math.max(0, tramoB.cintas - 1)" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-lg font-mono w-5 text-center">{{ tramoB.cintas }}</span>
+                      <button @click="tramoB.cintas++" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="text-xs text-gray-400">Estiradas</label>
+                    <div class="flex items-center gap-1">
+                      <button @click="tramoB.estiradas = Math.max(0, tramoB.estiradas - 1)" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">-</button>
+                      <span class="text-lg font-mono w-5 text-center">{{ tramoB.estiradas }}</span>
+                      <button @click="tramoB.estiradas++" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
                     </div>
                   </div>
                 </div>
@@ -1688,7 +1709,7 @@ if (typeof window !== 'undefined') {
           <div v-for="c in fechaCategorias" :key="c.id" class="bg-gray-50 rounded-lg p-3 flex items-center justify-between">
             <div>
               <p class="font-medium text-gray-800 text-sm">{{ c.categoria_catalogo?.nombre || c.nombre }}</p>
-              <p class="text-xs text-gray-500">Estaca: {{ c.penal_estaca_seg }}s &middot; Cinta: {{ c.penal_cinta_seg }}s
+              <p class="text-xs text-gray-500">Estaca: {{ c.penal_estaca_seg }}s &middot; Cinta: {{ c.penal_cinta_seg }}s &middot; Estirada: {{ c.penal_estirada_seg || 60 }}s
                 <span v-if="c.tipo_pista" class="ml-1">&middot; Pista {{ c.tipo_pista }}</span>
                 <span v-else class="ml-1 text-gray-300">&middot; Pista de la fecha</span>
               </p>
@@ -1708,7 +1729,7 @@ if (typeof window !== 'undefined') {
                 <option v-for="c in catalogo.filter(c => !fechaCategorias.some((fc: any) => (fc.categoria_catalogo?.id || fc.categoria_catalogo_id) === c.id))"
                   :key="c.id" :value="c.id">{{ c.nombre }}</option>
               </select>
-              <div class="grid grid-cols-2 gap-2">
+              <div class="grid grid-cols-3 gap-2">
                 <div>
                   <label class="text-xs text-gray-500">Estaca (seg)</label>
                   <input v-model.number="addCatForm.penal_estaca_seg" type="number" min="0" class="w-full rounded border border-gray-300 px-2 py-1.5 text-sm outline-none" />
@@ -1716,6 +1737,10 @@ if (typeof window !== 'undefined') {
                 <div>
                   <label class="text-xs text-gray-500">Cinta (seg)</label>
                   <input v-model.number="addCatForm.penal_cinta_seg" type="number" min="0" class="w-full rounded border border-gray-300 px-2 py-1.5 text-sm outline-none" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500">Estirada (seg)</label>
+                  <input v-model.number="addCatForm.penal_estirada_seg" type="number" min="0" class="w-full rounded border border-gray-300 px-2 py-1.5 text-sm outline-none" />
                 </div>
               </div>
               <div>
