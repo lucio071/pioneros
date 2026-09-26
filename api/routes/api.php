@@ -104,6 +104,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/fechas/{fecha}/activar', [FechaController::class, 'activar']);
     Route::post('/fechas/{fecha}/finalizar', [FechaController::class, 'finalizar']);
     Route::post('/fechas/{fecha}/desbloquear', [FechaController::class, 'desbloquear']);
+    Route::get('/fechas/{fecha}/export-csv', [FechaController::class, 'exportCsv']);
+    Route::get('/campeonatos/{campeonato}/export-csv', [CampeonatoController::class, 'exportCsv']);
 
     // Fecha categorias
     Route::post('/fechas/{fecha}/categorias', [FechaController::class, 'addCategoria']);

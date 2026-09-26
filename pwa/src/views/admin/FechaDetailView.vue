@@ -1810,6 +1810,13 @@ if (typeof window !== 'undefined') {
             Agrega al menos una categoria para poder activar la fecha.
           </p>
 
+          <!-- Exportar resultados -->
+          <a v-if="fecha.estado === 'finalizada' || fecha.estado === 'activa'"
+            :href="'/api/v1/fechas/' + fecha.id + '/export-csv'"
+            class="block w-full bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium py-2.5 rounded-lg text-center mt-2">
+            Descargar resultados (CSV)
+          </a>
+
           <!-- Eliminar: solo admin, cualquier estado -->
           <button v-if="auth.isAdmin" @click="eliminarFecha"
             class="w-full bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2.5 rounded-lg mt-4">Eliminar fecha</button>
