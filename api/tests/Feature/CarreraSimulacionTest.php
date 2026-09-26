@@ -346,4 +346,76 @@ class CarreraSimulacionTest extends TestCase
         $this->assertEquals(142000, $trip301['mejor_vuelta_ms'], 'Ranking debe usar la mejor vuelta (V2 = 142000)');
         $this->assertEquals(2, $trip301['mejor_vuelta_numero'], 'Mejor vuelta debe ser V2');
     }
+
+    /**
+     * 11. Estiradas: penalización de 60s por estirada
+     */
+    public function test_estirada_suma_60_segundos(): void
+    {
+        $trip = $this->trips[0];
+
+        // Tramo A: 60000ms + 1 estirada (60s = 60000ms)
+        $this->guardarTramo($trip, 1, 'A', 60000, 0, 0, 1)->assertOk();
+        $this->guardarTramo($trip, 1, 'B', 60000)->assertOk();
+
+        $vuelta = $trip->fresh()->vueltas()->where('numero_vuelta', 1)->with('tramos.tiemposMuertos')->first();
+        $total = $vuelta->calcularTotal($this->fc->penal_estaca_seg, $this->fc->penal_cinta_seg, $this->fc->penal_estirada_seg);
+
+        // 60000 + 60000(estirada) + 60000 = 180000
+        $this->assertEquals(180000, $total, 'Estirada debe sumar 60s (60000ms)');
+    }
+
+    /**
+     * 12. Pista doble: vuelta completa (A+B) vs incompleta (solo A)
+     */
+    public function test_vuelta_completa_vs_incompleta_doble(): void
+    {
+        $trip = $this->trips[0];
+
+        // V1 solo tramo A
+        $this->guardarTramo($trip, 1, 'A', 80000)->assertOk();
+
+        // calcularTotal retorna el tiempo del tramo que existe
+        $vuelta = $trip->fresh()->vueltas()->where('numero_vuelta', 1)->with('tramos.tiemposMuertos')->first();
+        $total = $vuelta->calcularTotal($this->fc->penal_estaca_seg, $this->fc->penal_cinta_seg, $this->fc->penal_estirada_seg);
+        $this->assertEquals(80000, $total, 'calcularTotal con solo tramo A retorna ese tramo');
+
+        // Agregar tramo B → ahora completa
+        $this->guardarTramo($trip, 1, 'B', 90000)->assertOk();
+        $vuelta->refresh()->load('tramos.tiemposMuertos');
+        $totalCompleta = $vuelta->calcularTotal($this->fc->penal_estaca_seg, $this->fc->penal_cinta_seg, $this->fc->penal_estirada_seg);
+        $this->assertEquals(170000, $totalCompleta, 'Vuelta completa (A+B) = 80000 + 90000');
+    }
+
+    /**
+     * 13. Posición general: ranking ordena por mejor vuelta
+     */
+    public function test_ranking_posiciones_correctas(): void
+    {
+        // #301: vuelta = 150000 (rápido)
+        $this->guardarTramo($this->trips[0], 1, 'A', 70000)->assertOk();
+        $this->guardarTramo($this->trips[0], 1, 'B', 80000)->assertOk();
+
+        // #302: vuelta = 200000 (lento)
+        $this->guardarTramo($this->trips[1], 1, 'A', 100000)->assertOk();
+        $this->guardarTramo($this->trips[1], 1, 'B', 100000)->assertOk();
+
+        // #303: vuelta = 140000 (más rápido)
+        $this->guardarTramo($this->trips[2], 1, 'A', 65000)->assertOk();
+        $this->guardarTramo($this->trips[2], 1, 'B', 75000)->assertOk();
+
+        $ranking = $this->getRanking();
+        $ranked = collect($ranking['ranking'] ?? []);
+
+        $this->assertEquals('303', $ranked[0]['numero'], 'Posición 1 debe ser #303 (140000)');
+        $this->assertEquals('301', $ranked[1]['numero'], 'Posición 2 debe ser #301 (150000)');
+        $this->assertEquals('302', $ranked[2]['numero'], 'Posición 3 debe ser #302 (200000)');
+
+        $this->assertEquals(1, $ranked[0]['posicion']);
+        $this->assertEquals(2, $ranked[1]['posicion']);
+        $this->assertEquals(3, $ranked[2]['posicion']);
+
+        // Diferencia del segundo = su tiempo - tiempo del primero
+        $this->assertEquals(10000, $ranked[1]['diferencia'], 'Diferencia de #301 = 150000-140000');
+    }
 }
