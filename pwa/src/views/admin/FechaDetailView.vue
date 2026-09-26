@@ -707,6 +707,12 @@ function siguientePar(): { tripA: any, tripB: any } | null {
   return null
 }
 
+function seleccionarPar(par: any[]) {
+  pistaATrip.value = par[0]
+  pistaBTrip.value = par[1] || null
+  iniciarParManual()
+}
+
 function irASiguientePar() {
   const par = siguientePar()
   if (!par) { showToast('No hay más pares pendientes'); return }
@@ -1234,116 +1240,95 @@ if (typeof window !== 'undefined') {
       <!-- ==================== CRONOMETRAJE ==================== -->
       <div v-if="tab === 'cronometraje'" class="space-y-3">
         <template v-if="!selectedTrip">
-          <!-- Toggle pares (solo pista doble) -->
-          <div v-if="fecha?.tipo_pista === 'doble'" class="flex items-center justify-between">
-            <input v-model="search" placeholder="Buscar..." inputmode="search"
-              class="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 mr-2" />
-            <button @click="showPares = !showPares; if (showPares) initOrdenList()"
-              :class="['px-3 py-2.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
-                showPares ? 'bg-[var(--brand-color)] text-white' : 'bg-gray-200 text-gray-600']">
-              Pares
-            </button>
-          </div>
-          <input v-else v-model="search" placeholder="Buscar por numero o nombre..." inputmode="search"
-            class="w-full rounded-lg border border-gray-300 px-3 py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
 
-          <!-- Vista de pares con reorden -->
-          <div v-if="showPares && fecha?.tipo_pista === 'doble'" class="space-y-2">
-            <p v-if="!ordenBloqueado" class="text-xs text-gray-400">Usa las flechas para reordenar. Los pares se arman automatico (1vs2, 3vs4...).</p>
-            <p v-else class="text-xs text-green-600 font-medium">Orden bloqueado. Toca "Desbloquear" para modificar.</p>
-            <div class="bg-white rounded-xl shadow-sm divide-y divide-gray-100">
-              <div v-for="(t, i) in ordenList" :key="t.id"
-                class="flex items-center gap-2 px-3 py-2">
-                <span class="text-xs text-gray-300 w-5 shrink-0">{{ i + 1 }}</span>
-                <span :class="['text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0',
-                  i % 2 === 0 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700']">
-                  {{ i % 2 === 0 ? 'A' : 'B' }}
-                </span>
-                <span class="font-bold text-gray-800 text-sm">#{{ t.numero }}</span>
-                <span class="text-xs text-gray-500 truncate flex-1">{{ t.piloto }}</span>
-                <div class="flex gap-1 shrink-0">
-                  <button v-if="!ordenBloqueado" @click="moverArriba(i)" :disabled="i === 0"
-                    class="w-7 h-7 rounded bg-gray-100 hover:bg-gray-200 text-gray-500 disabled:opacity-30 text-sm">&#x25B2;</button>
-                  <button v-if="!ordenBloqueado" @click="moverAbajo(i)" :disabled="i === ordenList.length - 1"
-                    class="w-7 h-7 rounded bg-gray-100 hover:bg-gray-200 text-gray-500 disabled:opacity-30 text-sm">&#x25BC;</button>
+          <!-- === PISTA DOBLE: vista de pares === -->
+          <template v-if="esDobleCategoria">
+            <!-- Sorteo/reorden (colapsable) -->
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-gray-400 uppercase tracking-wider">Pares de largada</p>
+              <button @click="showPares = !showPares; if (showPares) initOrdenList()"
+                :class="['px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                  showPares ? 'bg-[var(--brand-color)] text-white' : 'bg-gray-200 text-gray-600']">
+                {{ showPares ? 'Cerrar orden' : 'Modificar orden' }}
+              </button>
+            </div>
+
+            <!-- Panel de sorteo/reorden (colapsable) -->
+            <div v-if="showPares" class="bg-white rounded-xl shadow-sm p-3 space-y-2">
+              <p v-if="!ordenBloqueado" class="text-xs text-gray-400">Usa las flechas para reordenar. Los pares se arman automatico (1vs2, 3vs4...).</p>
+              <p v-else class="text-xs text-green-600 font-medium">Orden bloqueado. Toca "Desbloquear" para modificar.</p>
+              <div class="divide-y divide-gray-100">
+                <div v-for="(t, i) in ordenList" :key="t.id"
+                  class="flex items-center gap-2 px-2 py-1.5">
+                  <span class="text-xs text-gray-300 w-4 shrink-0">{{ i + 1 }}</span>
+                  <span :class="['text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0',
+                    i % 2 === 0 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700']">
+                    {{ i % 2 === 0 ? 'A' : 'B' }}
+                  </span>
+                  <span class="font-bold text-gray-800 text-sm">#{{ t.numero }}</span>
+                  <span class="text-xs text-gray-500 truncate flex-1">{{ t.piloto }}</span>
+                  <div v-if="!ordenBloqueado" class="flex gap-1 shrink-0">
+                    <button @click="moverArriba(i)" :disabled="i === 0"
+                      class="w-7 h-7 rounded bg-gray-100 hover:bg-gray-200 text-gray-500 disabled:opacity-30 text-sm">&#x25B2;</button>
+                    <button @click="moverAbajo(i)" :disabled="i === ordenList.length - 1"
+                      class="w-7 h-7 rounded bg-gray-100 hover:bg-gray-200 text-gray-500 disabled:opacity-30 text-sm">&#x25BC;</button>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div v-if="!ordenBloqueado" class="flex gap-2">
-              <button @click="sortearOrden" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-medium py-2 rounded-lg text-sm">
-                Sortear
-              </button>
-              <button @click="guardarOrden" class="flex-1 bg-[var(--brand-color)] text-white font-medium py-2 rounded-lg text-sm">
-                Guardar orden
-              </button>
-            </div>
-            <button v-else @click="ordenBloqueado = false"
-              class="w-full bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2 rounded-lg text-sm">
-              Desbloquear orden
-            </button>
-            <div class="space-y-1">
-              <div v-for="(par, i) in pares" :key="i" class="bg-gray-50 rounded-lg p-2 flex items-center gap-2">
-                <span class="text-xs text-gray-400 w-5 text-center">{{ i + 1 }}</span>
-                <span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold">#{{ par[0].numero }}</span>
-                <span class="text-gray-300 text-xs">vs</span>
-                <span v-if="par[1]" class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-xs font-bold">#{{ par[1].numero }}</span>
-                <span v-else class="text-gray-300 text-xs">Solo</span>
+              <div v-if="!ordenBloqueado" class="flex gap-2">
+                <button @click="sortearOrden" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-medium py-2 rounded-lg text-sm">Sortear</button>
+                <button @click="guardarOrden" class="flex-1 bg-[var(--brand-color)] text-white font-medium py-2 rounded-lg text-sm">Guardar orden</button>
               </div>
+              <button v-else @click="ordenBloqueado = false"
+                class="w-full bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2 rounded-lg text-sm">Desbloquear orden</button>
             </div>
-          </div>
 
-          <!-- Seleccion de par manual (pista doble) -->
-          <div v-if="esDobleCategoria" class="bg-white rounded-xl p-3 shadow-sm space-y-2 mb-2">
-            <p class="text-[10px] text-gray-400 uppercase tracking-wider">Armar par</p>
-            <div class="grid grid-cols-2 gap-2">
-              <div :class="['rounded-lg p-2 text-center border-2', pistaATrip ? 'bg-blue-50 border-blue-400' : 'bg-gray-50 border-dashed border-gray-300']">
-                <p class="text-[10px] text-blue-500">Pista A</p>
-                <p v-if="pistaATrip" class="font-bold text-lg">#{{ pistaATrip.numero }}</p>
-                <p v-if="pistaATrip" class="text-xs text-gray-500">{{ pistaATrip.piloto }}</p>
-                <p v-else class="text-gray-300 text-sm">Tocar tripulacion</p>
-                <button v-if="pistaATrip" @click="pistaATrip = null" class="text-[10px] text-red-400 mt-1">Quitar</button>
-              </div>
-              <div :class="['rounded-lg p-2 text-center border-2', pistaBTrip ? 'bg-amber-50 border-amber-400' : 'bg-gray-50 border-dashed border-gray-300']">
-                <p class="text-[10px] text-amber-500">Pista B</p>
-                <p v-if="pistaBTrip" class="font-bold text-lg">#{{ pistaBTrip.numero }}</p>
-                <p v-if="pistaBTrip" class="text-xs text-gray-500">{{ pistaBTrip.piloto }}</p>
-                <p v-else class="text-gray-300 text-sm">Tocar tripulacion</p>
-                <button v-if="pistaBTrip" @click="pistaBTrip = null" class="text-[10px] text-red-400 mt-1">Quitar</button>
-              </div>
+            <!-- Lista de pares clickeable -->
+            <div class="space-y-2">
+              <button v-for="(par, i) in pares" :key="i" @click="seleccionarPar(par)"
+                class="w-full bg-white rounded-xl p-3 shadow-sm flex items-center gap-3 text-left hover:shadow-md transition-shadow">
+                <span class="text-lg font-bold text-gray-300 w-6 text-center shrink-0">{{ i + 1 }}</span>
+                <div class="flex-1 grid grid-cols-2 gap-2">
+                  <div class="bg-blue-50 rounded-lg p-2 text-center">
+                    <p class="text-[10px] text-blue-500 font-medium">A</p>
+                    <p class="font-bold text-lg text-gray-800">#{{ par[0].numero }}</p>
+                    <p class="text-xs text-gray-500 truncate">{{ par[0].piloto }}</p>
+                    <span :class="['text-[9px] px-1.5 py-0.5 rounded-full', estadoColor(par[0].estado)]">{{ estadoLabel(par[0].estado) }}</span>
+                  </div>
+                  <div v-if="par[1]" class="bg-amber-50 rounded-lg p-2 text-center">
+                    <p class="text-[10px] text-amber-500 font-medium">B</p>
+                    <p class="font-bold text-lg text-gray-800">#{{ par[1].numero }}</p>
+                    <p class="text-xs text-gray-500 truncate">{{ par[1].piloto }}</p>
+                    <span :class="['text-[9px] px-1.5 py-0.5 rounded-full', estadoColor(par[1].estado)]">{{ estadoLabel(par[1].estado) }}</span>
+                  </div>
+                  <div v-else class="bg-gray-50 rounded-lg p-2 text-center">
+                    <p class="text-gray-300 text-sm">Solo</p>
+                  </div>
+                </div>
+              </button>
             </div>
-            <button v-if="pistaATrip" @click="iniciarParManual"
-              class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-lg text-sm">
-              Cronometrar {{ pistaATrip ? '#' + pistaATrip.numero : '' }} {{ pistaBTrip ? 'vs #' + pistaBTrip.numero : '(solo)' }}
-            </button>
-          </div>
+          </template>
 
-          <!-- Lista de tripulaciones para cronometrar -->
-          <div class="space-y-1.5">
-            <button v-for="t in filteredTrips" :key="t.id" @click="asignarPista(t)"
-              class="w-full bg-white rounded-lg p-3 shadow-sm flex items-center gap-3 text-left hover:shadow-md transition-shadow">
-              <div :class="['w-12 h-12 rounded-lg flex items-center justify-center font-bold text-xl shrink-0',
-                pistaATrip?.id === t.id ? 'bg-blue-500 text-white' :
-                pistaBTrip?.id === t.id ? 'bg-amber-500 text-white' :
-                'bg-[var(--brand-color)] text-white']">
-                {{ t.numero }}
-              </div>
-              <div class="min-w-0 flex-1">
-                <p class="font-medium text-gray-800 text-sm">{{ t.nombre }}</p>
-                <p class="text-xs text-gray-500">{{ t.piloto }}</p>
-              </div>
-              <div class="flex items-center gap-1 shrink-0">
-                <span v-if="pistaATrip?.id === t.id" class="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">A</span>
-                <span v-if="pistaBTrip?.id === t.id" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">B</span>
+          <!-- === PISTA SIMPLE: lista de trips === -->
+          <template v-else>
+            <input v-model="search" placeholder="Buscar por numero o nombre..." inputmode="search"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2.5 outline-none focus:ring-2 focus:ring-blue-500" />
+            <div class="space-y-1.5">
+              <button v-for="t in filteredTrips" :key="t.id" @click="selectTrip(t)"
+                class="w-full bg-white rounded-lg p-3 shadow-sm flex items-center gap-3 text-left hover:shadow-md transition-shadow">
+                <div class="w-12 h-12 rounded-lg flex items-center justify-center font-bold text-xl shrink-0 bg-[var(--brand-color)] text-white">
+                  {{ t.numero }}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="font-medium text-gray-800 text-sm">{{ t.nombre }}</p>
+                  <p class="text-xs text-gray-500">{{ t.piloto }}</p>
+                </div>
                 <span :class="['text-[10px] px-1.5 py-0.5 rounded-full', estadoColor(t.estado)]">
                   {{ estadoLabel(t.estado) }}
                 </span>
-                <button v-if="t.estado !== 'abandonado'" @click.stop="marcarDNF(t)"
-                  class="text-[9px] bg-red-50 text-red-500 px-1.5 py-0.5 rounded hover:bg-red-100">DNF</button>
-                <button v-else @click.stop="reincorporarTrip(t)"
-                  class="text-[9px] bg-green-50 text-green-600 px-1.5 py-0.5 rounded hover:bg-green-100">Reinc.</button>
-              </div>
-            </button>
-          </div>
+              </button>
+            </div>
+          </template>
         </template>
 
         <!-- Trip selected: entry form -->
